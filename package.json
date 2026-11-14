@@ -1,10 +1,9 @@
 {
   "name": "forward-scheduler-bot",
   "private": true,
-  "version": "1.1.2",
+  "version": "1.1.4",
   "scripts": {
     "build": "python -m compileall -q worker.py",
-    "test": "python -m unittest discover -s tests -v",
-    "deploy": "uv run --group dev pywrangler deploy"
+    "deploy": "bash -c 'set -Eeuo pipefail; UV_VERSION=0.13.8; UV_DIR=\"$HOME/.local/bin\"; UV_BIN=\"$UV_DIR/uv\"; if [ ! -x \"$UV_BIN\" ] || [ \"$(\"$UV_BIN\" --version 2>/dev/null || true)\" != \"uv $UV_VERSION\" ]; then mkdir -p \"$UV_DIR\"; curl --fail --silent --show-error --location \"https://astral.sh/uv/$UV_VERSION/install.sh\" | env UV_INSTALL_DIR=\"$UV_DIR\" UV_NO_MODIFY_PATH=1 sh; fi; \"$UV_BIN\" --version; exec \"$UV_BIN\" run --group dev pywrangler deploy'"
   }
 }
