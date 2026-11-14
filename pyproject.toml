@@ -1,9 +1,12 @@
 [project]
 name = "forward-scheduler-bot"
-version = "1.1.1"
-description = "Single-import Telegram forward scheduler for Cloudflare Python Workers"
+version = "1.1.2"
+description = "Telegram forward scheduler for Cloudflare Python Workers"
 requires-python = ">=3.13"
 dependencies = []
 
 [dependency-groups]
-dev = ["workers-py", "workers-runtime-sdk"]
+dev = [
+    "workers-py>=1.9",
+    "workers-runtime-sdk"
+]

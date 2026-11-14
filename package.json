@@ -1,17 +1,10 @@
 {
   "name": "forward-scheduler-bot",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.1.2",
   "scripts": {
-    "build": "python -m compileall -q worker.py tests",
+    "build": "python -m compileall -q worker.py",
     "test": "python -m unittest discover -s tests -v",
-    "deploy": "uv run pywrangler deploy"
-  },
-  "cloudflare": {
-    "bindings": {
-      "SCHEDULER": {
-        "description": "Durable Object with SQLite storage; Cloudflare provisions it during deployment."
-      }
-    }
+    "deploy": "uv run --group dev pywrangler deploy"
   }
 }

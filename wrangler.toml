@@ -1,4 +1,4 @@
-name = "forward-scheduler-bot"
+name = "forwardfake"
 main = "worker.py"
 compatibility_date = "2026-11-14"
 compatibility_flags = ["python_workers"]
