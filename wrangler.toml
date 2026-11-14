@@ -1,0 +1,12 @@
+name = "forward-scheduler-bot"
+main = "worker.py"
+compatibility_date = "2026-11-14"
+compatibility_flags = ["python_workers"]
+
+[[durable_objects.bindings]]
+name = "SCHEDULER"
+class_name = "ForwardScheduler"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ForwardScheduler"]
