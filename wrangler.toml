@@ -1,14 +1,13 @@
 name = "forwardfake"
 main = "worker.js"
-compatibility_date = "2026-11-14"
-
+compatibility_date = "2026-11-15"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
 
 [[durable_objects.bindings]]
 name = "SCHEDULER"
 class_name = "ForwardScheduler"
 
-# Keep the existing v1 SQLite Durable Object class so the JS rewrite can
-# continue using the same persisted scheduler state and namespace.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ForwardScheduler"]
