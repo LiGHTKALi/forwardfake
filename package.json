@@ -1,15 +1,17 @@
 {
   "name": "forward-scheduler-ultimate",
   "private": true,
-  "version": "3.3.0",
+  "version": "4.0.0",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "node --check worker.js && node --check lib.js",
+    "build": "node --check worker.js && node --check lib.js && node scripts/validate-database.mjs && node --test",
+    "test": "node --test",
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev"
+    "dev": "wrangler dev",
+    "tail": "wrangler tail"
   },
   "devDependencies": {
     "wrangler": "4.162.0"

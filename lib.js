@@ -3,6 +3,9 @@ export const MAX_DATABASE_BYTES = 256 * 1024;
 export const MAX_RULES = 1_000;
 export const MAX_LIST_ITEMS = 5_000;
 export const MAX_TEXT_LENGTH = 8_000;
+export const MAX_RESOURCE_ENTRIES = 50_000;
+export const MAX_DATABASE_DEPTH = 40;
+export const MAX_DATABASE_NODES = 100_000;
 
 const TELEGRAM_HOSTS = new Set(["t.me", "www.t.me", "telegram.me", "www.telegram.me"]);
 const USERNAME_RE = /^[A-Za-z][A-Za-z0-9_]{4,31}$/;
@@ -104,8 +107,35 @@ export function validateDatabase(database) {
   if (!database.features || typeof database.features !== "object" || Array.isArray(database.features)) throw new Error("database_features_missing");
 
   const roles = database.roles ?? {};
-  if (roles.adminIds != null && (!Array.isArray(roles.adminIds) || roles.adminIds.length > 500 || roles.adminIds.some((id) => !/^\d{5,20}$/.test(String(id))))) {
-    throw new Error("database_admins_invalid");
+  for (const field of ["adminIds", "protectedIds"]) {
+    const list = roles[field];
+    if (list != null && (!Array.isArray(list) || list.length > 500 || list.some((id) => !/^\d{1,20}$/.test(String(id))))) {
+      throw new Error(`database_${field}_invalid`);
+    }
+  }
+  if (roles.adminsByChat != null) {
+    if (!roles.adminsByChat || typeof roles.adminsByChat !== "object" || Array.isArray(roles.adminsByChat)) {
+      throw new Error("database_admins_by_chat_invalid");
+    }
+    const chatEntries = Object.entries(roles.adminsByChat);
+    if (chatEntries.length > 500) throw new Error("database_admins_by_chat_too_large");
+    for (const [chatId, admins] of chatEntries) {
+      if (!/^-?\d{1,20}$/.test(chatId) || !Array.isArray(admins) || admins.length > 200 || admins.some((id) => !/^\d{1,20}$/.test(String(id)))) {
+        throw new Error("database_admins_by_chat_invalid");
+      }
+    }
+  }
+
+  const limits = database.limits ?? {};
+  for (const field of ["groupSendIntervalMs", "chatSendIntervalMs", "channelSendIntervalMs", "ownerSendIntervalMs"]) {
+    // Keep send delays compatible with the bounded Worker wait window and avoid
+    // deliberately configuring sub-second message bursts.
+    if (limits[field] != null && (!Number.isFinite(Number(limits[field])) || Number(limits[field]) < 1_000 || Number(limits[field]) > 4_000)) {
+      throw new Error(`database_limit_invalid:${field}`);
+    }
+  }
+  if (limits.maxChatRulesEvaluated != null && (!Number.isInteger(Number(limits.maxChatRulesEvaluated)) || Number(limits.maxChatRulesEvaluated) < 1 || Number(limits.maxChatRulesEvaluated) > 1_000)) {
+    throw new Error("database_chat_rule_limit_invalid");
   }
 
   const capabilities = database.runtime?.capabilities ?? [];
@@ -115,42 +145,81 @@ export function validateDatabase(database) {
   const resources = database.runtime?.resources ?? [];
   if (!Array.isArray(resources) || resources.length > 96) throw new Error("database_resources_invalid");
   const seenResources = new Set();
+  let totalResourceEntries = 0;
   for (const resource of resources) {
     if (!resource || typeof resource !== "object" || Array.isArray(resource)) throw new Error("database_resource_invalid");
     const id = String(resource.id || "");
-    if (!RESOURCE_ID_RE.test(id) || seenResources.has(id)) throw new Error("database_resource_id_invalid");
+    if (!RESOURCE_ID_RE.test(id) || id === "v2" || seenResources.has(id)) throw new Error("database_resource_id_invalid");
     if (!RESOURCE_TYPES.has(resource.type)) throw new Error(`database_resource_type_unsupported:${id}`);
     seenResources.add(id);
-    const ttl = Number(resource.ttlSeconds || 0);
-    const maxEntries = Number(resource.maxEntries || 1000);
+    const ttl = Number(resource.ttlSeconds ?? 0);
+    const maxEntries = Number(resource.maxEntries ?? 1_000);
+    const schema = Number(resource.schema ?? 1);
     if (!Number.isFinite(ttl) || ttl < 0 || ttl > 31_536_000) throw new Error(`database_resource_ttl_invalid:${id}`);
     if (!Number.isInteger(maxEntries) || maxEntries < 1 || maxEntries > 20_000) throw new Error(`database_resource_capacity_invalid:${id}`);
+    if (!Number.isInteger(schema) || schema < 1 || schema > 10_000) throw new Error(`database_resource_schema_invalid:${id}`);
+    totalResourceEntries += maxEntries;
     if (resource.onSchemaChange != null && !["keep", "reset"].includes(resource.onSchemaChange)) throw new Error(`database_resource_migration_invalid:${id}`);
     if (resource.eviction != null && !["fifo", "ring", "none"].includes(resource.eviction)) throw new Error(`database_resource_eviction_invalid:${id}`);
   }
+  if (totalResourceEntries > MAX_RESOURCE_ENTRIES) throw new Error("database_resource_total_capacity_exceeded");
 
   const rules = database.features.chatbot?.rules ?? [];
   if (!Array.isArray(rules) || rules.length > MAX_RULES) throw new Error("database_chatbot_rules_invalid");
   for (const [index, rule] of rules.entries()) {
     if (!rule || typeof rule !== "object" || Array.isArray(rule)) throw new Error(`database_chatbot_rule_invalid:${index}`);
-    if (!Array.isArray(rule.keywords) || !rule.keywords.length || rule.keywords.length > 40) throw new Error(`database_chatbot_keywords_invalid:${index}`);
-    if (rule.responses != null && (!Array.isArray(rule.responses) || rule.responses.length > 30)) throw new Error(`database_chatbot_responses_invalid:${index}`);
+    if (!Array.isArray(rule.keywords) || !rule.keywords.length || rule.keywords.length > 40
+      || rule.keywords.some((item) => typeof item !== "string" || !item.trim() || item.length > 120)) {
+      throw new Error(`database_chatbot_keywords_invalid:${index}`);
+    }
+    if (rule.negativeKeywords != null && (!Array.isArray(rule.negativeKeywords) || rule.negativeKeywords.length > 40
+      || rule.negativeKeywords.some((item) => typeof item !== "string" || item.length > 120))) {
+      throw new Error(`database_chatbot_negative_keywords_invalid:${index}`);
+    }
+    if (rule.responses != null && (!Array.isArray(rule.responses) || rule.responses.length > 30
+      || rule.responses.some((item) => typeof item !== "string" || item.length > MAX_TEXT_LENGTH))) {
+      throw new Error(`database_chatbot_responses_invalid:${index}`);
+    }
     if (rule.match != null && !["any", "all", "exact"].includes(rule.match)) throw new Error(`database_chatbot_match_invalid:${index}`);
-  }
-
-  for (const [featureName, feature] of Object.entries(database.features)) {
-    if (!feature || typeof feature !== "object" || Array.isArray(feature)) continue;
-    for (const [key, value] of Object.entries(feature)) {
-      if (Array.isArray(value) && value.length > MAX_LIST_ITEMS) throw new Error(`database_list_too_large:${featureName}.${key}`);
+    if (rule.threshold != null && (!Number.isFinite(Number(rule.threshold)) || Number(rule.threshold) < 1 || Number(rule.threshold) > 40)) {
+      throw new Error(`database_chatbot_threshold_invalid:${index}`);
+    }
+    if (rule.priority != null && (!Number.isFinite(Number(rule.priority)) || Number(rule.priority) < 0 || Number(rule.priority) > 100)) {
+      throw new Error(`database_chatbot_priority_invalid:${index}`);
     }
   }
 
-  const visit = (value, path = "texts") => {
-    if (typeof value === "string" && value.length > MAX_TEXT_LENGTH) throw new Error(`database_text_too_long:${path}`);
-    if (Array.isArray(value)) value.forEach((item, index) => visit(item, `${path}.${index}`));
-    else if (value && typeof value === "object") for (const [key, child] of Object.entries(value)) visit(child, `${path}.${key}`);
-  };
-  visit(database.texts);
+  // The uploaded file is parsed as strict JSON data, never evaluated as executable JavaScript.
+  // Bound nesting, total nodes, keys, and strings so pathological files cannot exhaust the Worker.
+  const stack = [{ value: database, path: "database", depth: 0 }];
+  let nodes = 0;
+  while (stack.length) {
+    const { value, path, depth } = stack.pop();
+    nodes += 1;
+    if (nodes > MAX_DATABASE_NODES) throw new Error("database_structure_too_large");
+    if (depth > MAX_DATABASE_DEPTH) throw new Error("database_nesting_too_deep");
+    if (typeof value === "string") {
+      if (value.length > MAX_TEXT_LENGTH) throw new Error(`database_text_too_long:${path}`);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      if (value.length > MAX_LIST_ITEMS) throw new Error(`database_list_too_large:${path}`);
+      for (let index = value.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: value[index], path: `${path}.${index}`, depth: depth + 1 });
+      }
+      continue;
+    }
+    if (value && typeof value === "object") {
+      const entries = Object.entries(value);
+      if (entries.length > MAX_LIST_ITEMS) throw new Error(`database_object_too_large:${path}`);
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const [key, child] = entries[index];
+        if (key.length > 160) throw new Error(`database_key_too_long:${path}`);
+        if (["__proto__", "prototype", "constructor"].includes(key)) throw new Error(`database_dangerous_key:${path}.${key}`);
+        stack.push({ value: child, path: `${path}.${key}`, depth: depth + 1 });
+      }
+    }
+  }
   return true;
 }
 
