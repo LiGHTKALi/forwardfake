@@ -18,7 +18,10 @@ import {
   utcDay,
 } from "./lib.js";
 
-// Credentials are supplied as Cloudflare Worker Secrets; never commit a bot token.
+// Embedded bot token requested by the project owner.
+// WARNING: anyone who can read this source or its ZIP can control the Telegram bot.
+// Rotate this token in @BotFather if this project is shared or published.
+const EMBEDDED_BOT_TOKEN = "9100041417:AAHYOpFKKTGpBQpdHoTAExwZYzlXPqOtSjg";
 const BOT_API = "https://api.telegram.org/bot";
 const BOT_FILE_API = "https://api.telegram.org/file/bot";
 const DO_NAME = "forward-scheduler-owner";
@@ -45,7 +48,8 @@ function textResponse(text, status = 200) {
 }
 
 function botTokenFrom(env) {
-  return String(env?.BOT_TOKEN || "").trim();
+  // Embedded token takes precedence; BOT_TOKEN remains an override/fallback.
+  return String(EMBEDDED_BOT_TOKEN || env?.BOT_TOKEN || "").trim();
 }
 
 function validBotToken(env) {
