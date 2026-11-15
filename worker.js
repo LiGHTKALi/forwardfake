@@ -1853,7 +1853,7 @@ export default {
     if (request.method === "GET" && path === "/healthz") return textResponse("ok");
 
     if (request.method === "GET" && (path === "/" || path === "/setup")) {
-      if (!validBotToken(env)) return textResponse("BOT_TOKEN secret is missing or invalid. Configure it in Cloudflare Workers > Settings > Variables and Secrets.", 503);
+      if (!validBotToken(env)) return textResponse("Bot token is missing or invalid. Check the embedded token in worker.js.", 503);
       const token = botTokenFrom(env);
       const secret = await webhookSecret(token);
       let result;
@@ -1892,7 +1892,7 @@ export default {
     }
 
     if (request.method !== "POST" || path !== "/telegram/webhook") return textResponse("Not found", 404);
-    if (!validBotToken(env)) return textResponse("BOT_TOKEN secret is missing or invalid.", 503);
+    if (!validBotToken(env)) return textResponse("Bot token is missing or invalid. Check the embedded token in worker.js.", 503);
     const declaredLength = Number(request.headers.get("content-length") || 0);
     if (Number.isFinite(declaredLength) && declaredLength > 1_000_000) return textResponse("Payload too large", 413);
 

@@ -5,8 +5,6 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
 
-[secrets]
-required = ["BOT_TOKEN"]
 
 [[durable_objects.bindings]]
 name = "SCHEDULER"
