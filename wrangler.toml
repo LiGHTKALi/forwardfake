@@ -5,6 +5,10 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
 
+[vars]
+WORKER_PUBLIC_ORIGIN = "https://forwardfake.killerdutchmobin.workers.dev"
+CLOUDFLARE_ACCOUNT_ID = ""
+CLOUDFLARE_SCRIPT_NAME = "forwardfake"
 
 [[durable_objects.bindings]]
 name = "SCHEDULER"
