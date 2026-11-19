@@ -1,13 +1,12 @@
-name = "forwardfake"
+name = "forward-scheduler-owner"
 main = "worker.js"
-compatibility_date = "2026-11-15"
+compatibility_date = "2026-11-20"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
 
-[vars]
-# deploy.bat / deploy.sh / npm run deploy:auto writes this automatically.
-OWNER_TELEGRAM_ID = ""
+[triggers]
+crons = ["* * * * *"]
 
 [[durable_objects.bindings]]
 name = "SCHEDULER"
