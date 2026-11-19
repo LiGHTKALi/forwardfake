@@ -52,7 +52,7 @@ export class ForwardScheduler extends DurableObject {
   }
 
   handleUpdate(update) { return this.runtime.handleUpdate(update); }
-  setupWebhookOnce() { return this.runtime.setupWebhookOnce(); }
+  setupWebhookOnce(publicOrigin) { return this.runtime.setupWebhookOnce(publicOrigin); }
   alarm(alarmInfo) { return this.runtime.alarm(alarmInfo); }
 }
 
@@ -62,28 +62,26 @@ export default {
     const path = url.pathname;
     if (request.method === "GET" && path === "/healthz") return textResponse("ok");
     if (request.method === "GET" && path === "/") {
-      return textResponse("ربات زمان‌بندی فعال است. برای راه‌اندازی اولیه وبهوک، فقط یک‌بار از مسیر /setup استفاده کنید.");
+      return textResponse("Forward Scheduler is online. Open /setup once to connect the Telegram webhook.");
     }
 
     if (request.method === "GET" && path === "/setup") {
-      if (!validBotToken(env)) return textResponse("توکن داخلی ربات معتبر نیست.", 503);
+      if (!validBotToken(env)) return textResponse("The embedded Telegram bot token is invalid.", 503);
       try {
         const stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
-        const result = await stub.setupWebhookOnce();
-        if (!result.ok) {
-          return textResponse("راه‌اندازی وبهوک در این مرحله مجاز نیست؛ پس از ثبت مالک، از پنل خصوصی مالک اتصال را برقرار کنید.", 403);
-        }
+        const result = await stub.setupWebhookOnce(url.origin);
+        if (!result.ok) return textResponse(`Webhook setup failed: ${result.reason || "unknown error"}`, 502);
         return textResponse(result.already
-          ? "وبهوک از قبل فعال است؛ برای اتصال دوباره از پنل خصوصی مالک استفاده کنید."
-          : "وبهوک نصب شد. مالک باید پیش از عمومی‌کردن ربات، از حساب شخصی خود در گفت‌وگوی خصوصی ربات /start بفرستد.");
+          ? "Webhook is already connected."
+          : "Webhook connected. The configured owner can now open the bot and send /settings.");
       } catch (error) {
         safeLogError("webhook_bootstrap_failed", error);
-        return textResponse("راه‌اندازی وبهوک با خطای موقت روبه‌رو شد.", 502);
+        return textResponse("Webhook setup failed due to a temporary error.", 502);
       }
     }
 
     if (request.method !== "POST" || path !== "/telegram/webhook") return textResponse("Not found", 404);
-    if (!validBotToken(env)) return textResponse("توکن داخلی ربات معتبر نیست.", 503);
+    if (!validBotToken(env)) return textResponse("The embedded Telegram bot token is invalid.", 503);
     const declaredLength = Number(request.headers.get("content-length") || 0);
     if (Number.isFinite(declaredLength) && declaredLength > MAX_WEBHOOK_BYTES) return textResponse("Payload too large", 413);
 

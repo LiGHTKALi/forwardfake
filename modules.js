@@ -1,5 +1,6 @@
 export const DAY_MS = 86_400_000;
-export const MAX_DATABASE_BYTES = 256 * 1024;
+export const MAX_DATABASE_BYTES = 20 * 1024 * 1024;
+export const DATABASE_CHUNK_CHARS = 400_000;
 export const MAX_RULES = 1_000;
 export const MAX_LIST_ITEMS = 5_000;
 export const MAX_TEXT_LENGTH = 8_000;
@@ -84,17 +85,19 @@ export function parseDatabaseModule(source) {
   const raw = String(source ?? "").replace(/^\uFEFF/, "").trim();
   const bytes = new TextEncoder().encode(raw).byteLength;
   if (!raw || bytes > MAX_DATABASE_BYTES) throw new Error("database_size_invalid");
-  if (!raw.startsWith("export default")) throw new Error("database_module_must_export_default");
 
-  let body = raw.slice("export default".length).trim();
-  if (body.endsWith(";")) body = body.slice(0, -1).trim();
-  if (!body.startsWith("{") || !body.endsWith("}")) throw new Error("database_must_be_object_literal");
+  let body = raw;
+  if (body.startsWith("export default")) {
+    body = body.slice("export default".length).trim();
+    if (body.endsWith(";")) body = body.slice(0, -1).trim();
+  }
+  if (!body.startsWith("{") || !body.endsWith("}")) throw new Error("database_must_be_json_object");
 
   let database;
   try {
     database = JSON.parse(body);
   } catch {
-    throw new Error("database_must_use_data_only_js_syntax");
+    throw new Error("database_must_use_data_only_json");
   }
   validateDatabase(database);
   return database;
@@ -179,11 +182,22 @@ export function validateDatabase(database) {
   const supportedModerationActions = new Set(["ban", "kick", "mute", "unmute", "unban", "delete", "pin", "warn"]);
   if (!Array.isArray(moderationCommands) || moderationCommands.length > 100) throw new Error("database_moderation_commands_invalid");
   for (const [index, command] of moderationCommands.entries()) {
-    if (!command || typeof command !== "object" || !/^\/[a-z][a-z0-9_]{1,31}$/i.test(String(command.command || ""))
+    if (!command || typeof command !== "object" || !/^\/[a-z][a-z0-9_]{0,31}$/i.test(String(command.command || ""))
       || !supportedModerationActions.has(String(command.action || ""))
       || (command.enabled != null && typeof command.enabled !== "boolean")) {
       throw new Error(`database_moderation_command_invalid:${index}`);
     }
+  }
+
+  const configurableCommands = [
+    database.features.reports?.command,
+    database.features.groupControls?.command,
+    database.features.tagKnownMembers?.commands?.tagAll,
+    database.features.tagKnownMembers?.commands?.tagOptIn,
+    database.features.tagKnownMembers?.commands?.tagOptOut,
+  ];
+  if (configurableCommands.some((value) => value != null && !/^\/[a-z][a-z0-9_]{0,31}$/i.test(String(value)))) {
+    throw new Error("database_feature_command_invalid");
   }
 
   const antiSpam = database.features.antiSpam ?? {};
@@ -405,26 +419,26 @@ export function makeKeyboardButton(text, callbackData, style = "primary") {
 // Declarative feature modules. The Worker core only orchestrates these modules;
 // all user-editable defaults, texts, rules, and per-feature settings live in database.js.
 export const FEATURE_MODULES = Object.freeze([
-  { id: "chatbot", title: "گفت‌وگوی هوشمند NLP", category: "تعامل", description: "پاسخ فارسی بر پایه قوانین و کلیدواژه‌های دیتابیس.", path: "features.chatbot.enabled", settingsPath: "features.chatbot", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "jokes", title: "جوک و سرگرمی", category: "تعامل", description: "پاسخ به درخواست جوک و محتوای سرگرمی دیتابیس.", path: "features.jokes.enabled", settingsPath: "features.jokes", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "chatter", title: "گفت‌وگوی زمان‌بندی‌شده", category: "تعامل", description: "ارسال پیام زمان‌بندی‌شده با فاصله و نوسان کنترل‌شده.", path: "features.chatter.enabled", settingsPath: "features.chatter", defaultEnabled: false, requiredPermission: "send_messages", executionType: "alarm" },
-  { id: "customCommands", title: "دستورهای سفارشی", category: "تعامل", description: "تعریف فرمان و پاسخ سفارشی داخل دیتابیس.", path: "features.customCommands.enabled", settingsPath: "features.customCommands", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "automations", title: "اتوماسیون قانون‌محور", category: "تعامل", description: "اجرای پاسخ یا هشدار امن بر اساس قوانین دیتابیس.", path: "features.automations.enabled", settingsPath: "features.automations", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "memory", title: "حافظهٔ گفتگو", category: "تعامل", description: "حافظه کوتاه‌مدت با TTL و پاک‌سازی خودکار.", path: "features.memory.enabled", settingsPath: "features.memory", defaultEnabled: true, requiredPermission: "durable_storage", executionType: "per-chat" },
-  { id: "botReplyJokes", title: "شوخی با ریپلای به ربات", category: "تعامل", description: "پاسخ سرگرم‌کننده به برخی ریپلای‌ها.", path: "features.botReplyJokes.enabled", settingsPath: "features.botReplyJokes", defaultEnabled: false, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "welcome", title: "خوشامدگویی", category: "اعضا", description: "خوشامد idempotent به اعضای تازه‌وارد و ورود ربات.", path: "features.welcome.enabled", settingsPath: "features.welcome", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "goodbye", title: "پیام بدرقه", category: "اعضا", description: "اعلام خروج عضو از گروه.", path: "features.goodbye.enabled", settingsPath: "features.goodbye", defaultEnabled: false, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "captcha", title: "کپچای ورود", category: "اعضا", description: "محدودسازی موقت عضو تازه‌وارد با تأیید دکمه‌ای.", path: "features.captcha.enabled", settingsPath: "features.captcha", defaultEnabled: false, requiredPermission: "restrict_members", executionType: "per-group" },
-  { id: "joinRequests", title: "درخواست عضویت", category: "اعضا", description: "پردازش درخواست پیوستن به گروه.", path: "features.joinRequests.enabled", settingsPath: "features.joinRequests", defaultEnabled: false, requiredPermission: "invite_users", executionType: "per-group" },
-  { id: "reports", title: "گزارش تخلف", category: "اعضا", description: "ثبت گزارش و ارسال خلاصه به مالک.", path: "features.reports.enabled", settingsPath: "features.reports", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "antiSpam", title: "ضداسپم و ضدفلود", category: "امنیت", description: "تشخیص نرخ، تکرار، لینک، mention، فرمان و موج پیام.", path: "features.antiSpam.enabled", settingsPath: "features.antiSpam", defaultEnabled: true, requiredPermission: "delete_messages", executionType: "per-group" },
-  { id: "moderation", title: "مدیریت پیام و اعضا", category: "امنیت", description: "اخطار، حذف، بن، کیک، محدودسازی و رفع محدودیت با کنترل مجوز واقعی.", path: "features.moderation.enabled", settingsPath: "features.moderation", defaultEnabled: true, requiredPermission: "administrator", executionType: "per-group" },
-  { id: "linkGuard", title: "فیلتر لینک", category: "امنیت", description: "کنترل دامنه‌های ممنوع و فهرست مجاز.", path: "features.linkGuard.enabled", settingsPath: "features.linkGuard", defaultEnabled: true, requiredPermission: "delete_messages", executionType: "per-group" },
-  { id: "phishingGuard", title: "ضد فیشینگ", category: "امنیت", description: "شناسایی عبارات و دامنه‌های مشکوک تعریف‌شده.", path: "features.phishingGuard.enabled", settingsPath: "features.phishingGuard", defaultEnabled: true, requiredPermission: "delete_messages", executionType: "per-group" },
-  { id: "raidProtection", title: "ضد حمله و هجوم", category: "امنیت", description: "تشخیص موج ورود با آستانه و پنجره قابل تنظیم.", path: "features.raidProtection.enabled", settingsPath: "features.raidProtection", defaultEnabled: false, requiredPermission: "restrict_members", executionType: "per-group" },
-  { id: "forwarding", title: "زمان‌بندی فوروارد", category: "زمان‌بندی", description: "زمان‌بندی فوروارد به مقصد گروهی؛ انتشار مستقیم در کانال غیرفعال است.", path: "features.forwarding.enabled", settingsPath: "features.forwarding", defaultEnabled: true, requiredPermission: "send_messages", executionType: "alarm" },
-  { id: "groupControls", title: "کنترل روشن/خاموش گروه", category: "مدیریت", description: "دستور و دکمه /bot on و /bot off با احراز مدیر واقعی.", path: "features.groupControls.enabled", settingsPath: "features.groupControls", defaultEnabled: true, requiredPermission: "administrator", executionType: "per-group" },
-  { id: "tagKnownMembers", title: "تگ اعضای شناخته‌شده", category: "مدیریت", description: "پیش‌نمایش و تگ کاربران شناخته‌شده از Updateهای واقعی؛ نه همه اعضا.", path: "features.tagKnownMembers.enabled", settingsPath: "features.tagKnownMembers", defaultEnabled: false, requiredPermission: "administrator", executionType: "per-group" },
+  { id: "chatbot", title: "NLP Chatbot", category: "Engagement", description: "Database-driven responses based on rules and keywords.", path: "features.chatbot.enabled", settingsPath: "features.chatbot", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
+  { id: "jokes", title: "Jokes and Entertainment", category: "Engagement", description: "Responds to joke requests and database-defined entertainment content.", path: "features.jokes.enabled", settingsPath: "features.jokes", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
+  { id: "chatter", title: "Scheduled Chat", category: "Engagement", description: "Sends scheduled messages with configurable intervals and jitter.", path: "features.chatter.enabled", settingsPath: "features.chatter", defaultEnabled: false, requiredPermission: "send_messages", executionType: "alarm" },
+  { id: "customCommands", title: "Custom Commands", category: "Engagement", description: "Custom commands and replies are defined in the database.", path: "features.customCommands.enabled", settingsPath: "features.customCommands", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
+  { id: "automations", title: "Rule-based Automation", category: "Engagement", description: "Executes safe replies or alerts based on database rules.", path: "features.automations.enabled", settingsPath: "features.automations", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
+  { id: "memory", title: "Conversation Memory", category: "Engagement", description: "Short-term memory with TTL and automatic cleanup.", path: "features.memory.enabled", settingsPath: "features.memory", defaultEnabled: true, requiredPermission: "durable_storage", executionType: "per-chat" },
+  { id: "botReplyJokes", title: "Bot Reply Jokes", category: "Engagement", description: "Provides playful responses to selected replies.", path: "features.botReplyJokes.enabled", settingsPath: "features.botReplyJokes", defaultEnabled: false, requiredPermission: "send_messages", executionType: "per-group" },
+  { id: "welcome", title: "Welcome Messages", category: "Members", description: "Idempotent welcome messages for new members and bot joins.", path: "features.welcome.enabled", settingsPath: "features.welcome", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
+  { id: "goodbye", title: "Goodbye Messages", category: "Members", description: "Announces when a member leaves a group.", path: "features.goodbye.enabled", settingsPath: "features.goodbye", defaultEnabled: false, requiredPermission: "send_messages", executionType: "per-group" },
+  { id: "captcha", title: "Join CAPTCHA", category: "Members", description: "Temporarily restricts new members pending button confirmation.", path: "features.captcha.enabled", settingsPath: "features.captcha", defaultEnabled: false, requiredPermission: "restrict_members", executionType: "per-group" },
+  { id: "joinRequests", title: "Join Requests", category: "Members", description: "Processes requests to join a group.", path: "features.joinRequests.enabled", settingsPath: "features.joinRequests", defaultEnabled: false, requiredPermission: "invite_users", executionType: "per-group" },
+  { id: "reports", title: "Reports", category: "Members", description: "Records reports and sends a summary to the owner.", path: "features.reports.enabled", settingsPath: "features.reports", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
+  { id: "antiSpam", title: "Anti-Spam and Anti-Flood", category: "Security", description: "Detects rate spikes, duplicates, links, mentions, commands, and message floods.", path: "features.antiSpam.enabled", settingsPath: "features.antiSpam", defaultEnabled: true, requiredPermission: "delete_messages", executionType: "per-group" },
+  { id: "moderation", title: "Message and Member Moderation", category: "Security", description: "Warnings, deletion, bans, kicks, restrictions, and unrestrictions with permission checks.", path: "features.moderation.enabled", settingsPath: "features.moderation", defaultEnabled: true, requiredPermission: "administrator", executionType: "per-group" },
+  { id: "linkGuard", title: "Link Filter", category: "Security", description: "Enforces blocked-domain and allow-list policies.", path: "features.linkGuard.enabled", settingsPath: "features.linkGuard", defaultEnabled: true, requiredPermission: "delete_messages", executionType: "per-group" },
+  { id: "phishingGuard", title: "Anti-Phishing", category: "Security", description: "Detects configured suspicious phrases and domains.", path: "features.phishingGuard.enabled", settingsPath: "features.phishingGuard", defaultEnabled: true, requiredPermission: "delete_messages", executionType: "per-group" },
+  { id: "raidProtection", title: "Raid Protection", category: "Security", description: "Detects join spikes using configurable thresholds and time windows.", path: "features.raidProtection.enabled", settingsPath: "features.raidProtection", defaultEnabled: false, requiredPermission: "restrict_members", executionType: "per-group" },
+  { id: "forwarding", title: "Forward Scheduling", category: "Scheduling", description: "Schedules forwards to group destinations; direct channel publishing is disabled.", path: "features.forwarding.enabled", settingsPath: "features.forwarding", defaultEnabled: true, requiredPermission: "send_messages", executionType: "alarm" },
+  { id: "groupControls", title: "Group Reply Controls", category: "Management", description: "Database-configured command and buttons with live administrator verification.", path: "features.groupControls.enabled", settingsPath: "features.groupControls", defaultEnabled: true, requiredPermission: "administrator", executionType: "per-group" },
+  { id: "tagKnownMembers", title: "Tag Known Members", category: "Management", description: "Previews and tags known members from actual updates, not the full member list.", path: "features.tagKnownMembers.enabled", settingsPath: "features.tagKnownMembers", defaultEnabled: false, requiredPermission: "administrator", executionType: "per-group" },
 ]);
 
 export function getFeatureModule(id) {
@@ -468,6 +482,11 @@ export function parseCommand(text = "") {
   return { command: command.split("@")[0].toLowerCase(), args };
 }
 
+export function configuredCommand(value) {
+  const command = String(value ?? "").trim().toLowerCase();
+  return /^\/[a-z][a-z0-9_]{0,31}$/.test(command) ? command : "";
+}
+
 
 export function getModuleConfig(database, id) {
   const descriptor = getFeatureModule(id);
@@ -487,13 +506,6 @@ export function getTelegramUpdateActor(update) {
     ?? update?.edited_channel_post?.from?.id
     ?? update?.channel_post?.from?.id
     ?? "";
-}
-
-export function isOwnerBootstrapUpdate(update) {
-  const message = update?.message;
-  if (!message || message.chat?.type !== "private" || !message.from?.id || message.from.is_bot
-    || String(message.chat?.id || "") !== String(message.from.id)) return false;
-  return /^\/start(?:@\w+)?(?:\s|$)/i.test(String(message.text || "").trim());
 }
 
 export function reserveSplitQuota(currentQuota, ownerRequest, now = Date.now()) {
@@ -617,7 +629,7 @@ export function isPrivate(chat) {
 }
 
 export function userDisplay(user = {}) {
-  return user.first_name || user.username || String(user.id || "کاربر");
+  return user.first_name || user.username || String(user.id || "User");
 }
 
 export async function readBodyTextLimited(response, maxBytes) {
@@ -667,7 +679,8 @@ export function defaultState() {
     pendingResourceKeyCleanup: [],
     maintenanceNextAt: null,
     maintenanceCursor: null,
-    security: { ownerId: null, ownerClaimedAt: null, ownerUsername: null, ownerDisplayName: null, credentialSource: "embedded-source" },
+    security: { ownerId: null, ownerClaimedAt: null, ownerUsername: null, ownerDisplayName: null, credentialSource: "configured-owner" },
+    settings: { cacheEnabled: true, autoUpdate: true, botEnabled: true },
     webhookUrl: null,
     flow: null,
     forwardDraft: null,
@@ -734,6 +747,7 @@ export function mergeState(value) {
   return {
     ...base,
     ...value,
+    db: null,
     forwardTask,
     groupSettings: value.groupSettings && typeof value.groupSettings === "object" && !Array.isArray(value.groupSettings) ? value.groupSettings : {},
     spam: value.spam && typeof value.spam === "object" && !Array.isArray(value.spam) ? value.spam : {},
@@ -781,6 +795,13 @@ export function mergeState(value) {
       ...(value.security && typeof value.security === "object" && !Array.isArray(value.security) ? value.security : {}),
       ownerId: /^\d{1,20}$/.test(String(value.security?.ownerId || "")) ? String(value.security.ownerId) : null,
     },
+    settings: {
+      ...base.settings,
+      ...(value.settings && typeof value.settings === "object" && !Array.isArray(value.settings) ? value.settings : {}),
+      cacheEnabled: value.settings?.cacheEnabled !== false,
+      autoUpdate: value.settings?.autoUpdate !== false,
+      botEnabled: value.settings?.botEnabled !== false,
+    },
     flow: value.flow === "database_url" ? "database_upload" : (typeof value.flow === "string" ? value.flow.slice(0, 40) : null),
     dbFileName: typeof value.dbFileName === "string" ? value.dbFileName.slice(0, 128) : null,
     dbHash: typeof value.dbHash === "string" && /^[a-f0-9]{64}$/i.test(value.dbHash) ? value.dbHash : null,
@@ -814,6 +835,102 @@ export class ForwardSchedulerRuntime {
     this.answerCache = new Map();
     this.adminCache = new Map();
     this.telegramCache = new Map();
+    this.databaseCacheHash = "";
+    this.databaseCache = null;
+  }
+
+  #persistableState(state) {
+    const { db, ...snapshot } = state;
+    return structuredClone(snapshot);
+  }
+
+  async #storeDatabaseChunks(source, hash, filename = "database.js") {
+    const prefix = `database:v1:${hash}:chunk:`;
+    const writes = [];
+    for (let offset = 0, index = 0; offset < source.length; index += 1) {
+      let end = Math.min(source.length, offset + DATABASE_CHUNK_CHARS);
+      if (end < source.length) {
+        const lastCodeUnit = source.charCodeAt(end - 1);
+        if (lastCodeUnit >= 0xD800 && lastCodeUnit <= 0xDBFF) end -= 1;
+      }
+      writes.push(this.ctx.storage.put(`${prefix}${String(index).padStart(4, "0")}`, source.slice(offset, end)));
+      offset = end;
+    }
+    await Promise.all(writes);
+    const chunks = writes.length;
+    return {
+      hash,
+      chunks,
+      filename,
+      bytes: new TextEncoder().encode(source).byteLength,
+      installedAt: Date.now(),
+    };
+  }
+
+  async #removeDatabaseChunks(hash) {
+    if (!hash) return 0;
+    const prefix = `database:v1:${hash}:chunk:`;
+    let removed = 0;
+    while (true) {
+      const rows = await this.ctx.storage.list({ prefix, limit: 100 });
+      if (!rows.size) break;
+      removed += await this.ctx.storage.delete([...rows.keys()]);
+      if (rows.size < 100) break;
+    }
+    return removed;
+  }
+
+  async #hydrateDatabase(state) {
+    // Legacy inline database state is intentionally ignored. A database is active
+    // only when a separately uploaded file has a committed storage manifest.
+    const manifest = await this.ctx.storage.get("database:v1:manifest");
+    if (!manifest) {
+      state.db = null;
+      state.dbHash = null;
+      state.dbFileName = null;
+      state.dbInstalledAt = null;
+      state.dbManifest = null;
+      this.databaseCacheHash = "";
+      this.databaseCache = null;
+      return;
+    }
+    if (!manifest.hash || !Number.isInteger(manifest.chunks) || manifest.chunks < 1 || manifest.chunks > 64) {
+      throw new Error("DATABASE_STORAGE_MANIFEST_INVALID");
+    }
+    if (this.databaseCacheHash === manifest.hash && this.databaseCache) {
+      state.db = this.databaseCache;
+      state.dbHash = manifest.hash;
+      state.dbFileName = manifest.filename || "database.js";
+      state.dbInstalledAt = Number(manifest.installedAt || state.dbInstalledAt || 0) || null;
+      return;
+    }
+    const prefix = `database:v1:${manifest.hash}:chunk:`;
+    const parts = await Promise.all(Array.from({ length: manifest.chunks }, (_, index) =>
+      this.ctx.storage.get(`${prefix}${String(index).padStart(4, "0")}`)));
+    if (parts.some((chunk) => typeof chunk !== "string")) throw new Error("DATABASE_STORAGE_CHUNK_MISSING");
+    const source = parts.join("");
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+    const actualHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    if (actualHash !== manifest.hash) throw new Error("DATABASE_STORAGE_HASH_MISMATCH");
+    const database = parseDatabaseModule(source);
+    this.databaseCacheHash = manifest.hash;
+    this.databaseCache = database;
+    state.db = database;
+    state.dbHash = manifest.hash;
+    state.dbFileName = manifest.filename || "database.js";
+    state.dbInstalledAt = Number(manifest.installedAt || state.dbInstalledAt || 0) || null;
+  }
+
+  #cacheEnabled(state) {
+    return state?.settings?.cacheEnabled !== false;
+  }
+
+  #clearRuntimeCaches() {
+    const removed = this.answerCache.size + this.adminCache.size + this.telegramCache.size;
+    this.answerCache.clear();
+    this.adminCache.clear();
+    this.telegramCache.clear();
+    return removed;
   }
 
   #exclusive(operation) {
@@ -825,7 +942,7 @@ export class ForwardSchedulerRuntime {
         // Coalesce every state mutation made during one webhook/alarm into a single SQLite row write.
         const pending = this.pendingState;
         this.pendingState = null;
-        if (pending) await this.ctx.storage.put("state", pending);
+        if (pending) await this.ctx.storage.put("state", this.#persistableState(pending));
       }
     };
     const next = this.serial.then(run, run);
@@ -834,32 +951,33 @@ export class ForwardSchedulerRuntime {
   }
 
   async #load() {
-    // Within one serialized alarm/webhook, always build on the newest in-memory
-    // pending snapshot. Reading the persisted row between batched updates would
-    // otherwise overwrite earlier mutations before the coalesced commit.
     if (this.pendingState) return this.pendingState;
     const raw = await this.ctx.storage.get("state");
     let state = mergeState(raw);
-    const backup = await this.ctx.storage.get("database:backup:v5");
-    if (backup && state.dbHash !== backup.targetHash && backup.previous && typeof backup.previous === "object") {
-      state = mergeState({ ...state, ...backup.previous });
-      await this.ctx.storage.put("state", state);
-      await this.ctx.storage.delete("database:backup:v5");
-    } else if (backup && state.dbHash === backup.targetHash) {
-      await this.ctx.storage.delete("database:backup:v5");
-    }
+    await this.ctx.storage.delete("database:backup:v5");
     if (raw && state.migrationVersion < 5) {
       const backupKey = "migration:state-backup:v5";
       if (!(await this.ctx.storage.get(backupKey))) {
-        await this.ctx.storage.put(backupKey, { savedAt: Date.now(), fromVersion: state.migrationVersion || 4, state: raw });
+        const backupState = { ...raw };
+        delete backupState.db;
+        await this.ctx.storage.put(backupKey, { savedAt: Date.now(), fromVersion: state.migrationVersion || 4, state: backupState });
       }
       state.migrationVersion = 5;
       state.migrationStatus = { version: 5, status: "completed", completedAt: Date.now(), sourceVersion: state.migrationStatus?.sourceVersion || 4 };
-      await this.ctx.storage.put("state", state);
+      await this.ctx.storage.put("state", this.#persistableState(state));
     } else if (!raw) {
       state.migrationVersion = 5;
       state.migrationStatus = { version: 5, status: "initialized", completedAt: Date.now() };
-      await this.ctx.storage.put("state", state);
+      await this.ctx.storage.put("state", this.#persistableState(state));
+    }
+    await this.#hydrateDatabase(state);
+    const configuredOwner = String(this.env?.OWNER_TELEGRAM_ID || "").trim();
+    state.security.ownerId = /^\d{1,20}$/.test(configuredOwner) && Number(configuredOwner) > 0
+      ? configuredOwner
+      : null;
+    state.security.credentialSource = "configured-owner";
+    if (raw && (Object.hasOwn(raw, "db") || String(raw.security?.ownerId || "") !== String(state.security.ownerId || ""))) {
+      await this.ctx.storage.put("state", this.#persistableState(state));
     }
     return state;
   }
@@ -871,7 +989,8 @@ export class ForwardSchedulerRuntime {
   }
 
   #ownerId(state) {
-    return String(state?.security?.ownerId || "");
+    const configured = String(this.env?.OWNER_TELEGRAM_ID || "").trim();
+    return /^\d{1,20}$/.test(configured) && Number(configured) > 0 ? configured : "";
   }
 
   #db(state) {
@@ -884,13 +1003,6 @@ export class ForwardSchedulerRuntime {
     if (!globallyEnabled) return false;
     const local = chatId == null ? undefined : state?.groupModuleOverrides?.[String(chatId)]?.[id];
     return typeof local === "boolean" ? local : true;
-  }
-
-  #reserveWebhookRequest(state, actorId = "", bootstrapCandidate = false) {
-    const ownerRequest = this.#isOwner(actorId, state) || (!this.#ownerId(state) && bootstrapCandidate);
-    const reservation = reserveSplitQuota(state.quota, ownerRequest);
-    state.quota = reservation.quota;
-    return reservation;
   }
 
   #text(state, key, fallback = "") {
@@ -953,7 +1065,8 @@ export class ForwardSchedulerRuntime {
 
     const cacheable = ["getMe", "getChatMember", "getChatMemberCount"].includes(method);
     const cacheKey = cacheable ? `${method}:${JSON.stringify(payload)}` : "";
-    const cached = cacheable ? this.telegramCache.get(cacheKey) : null;
+    const useCache = cacheable && this.#cacheEnabled(state);
+    const cached = useCache ? this.telegramCache.get(cacheKey) : null;
     if (cached && cached.expiresAt > Date.now()) return cached.value;
     try {
       let data = null;
@@ -977,7 +1090,7 @@ export class ForwardSchedulerRuntime {
         if (!data || typeof data !== "object") data = { ok: false, error_code: response.status || 502, description: "INVALID_TELEGRAM_RESPONSE" };
         break;
       }
-      if (data?.ok && cacheable) {
+      if (data?.ok && useCache) {
         const ttl = method === "getMe" ? 6 * 60 * 60_000 : method === "getChatMemberCount" ? 60_000 : 20_000;
         this.telegramCache.set(cacheKey, { value: data, expiresAt: Date.now() + ttl });
         if (this.telegramCache.size > 1_000) {
@@ -1019,31 +1132,145 @@ export class ForwardSchedulerRuntime {
     await this.#telegram(null, "answerCallbackQuery", payload, { bypassLocalRate: true });
   }
 
-  #ownerKeyboard(state) {
-    const db = this.#db(state);
-    const rows = [
-      [button(this.#text(state, "ui.forward", "📨 زمان‌بندی فوروارد"), "forward:new", "primary")],
-      ...(state.forwardTask?.active ? [[button(this.#text(state, "ui.stopForward", "⏹ توقف فوروارد"), "forward:stop", "danger")]] : []),
-      [button("🧩 مدیریت قابلیت‌ها", "author:modules:0", "primary")],
-      [button("👥 گروه‌ها", "author:groups:0", "success"), button("📢 کانال‌ها", "author:channels:0", "primary")],
-      [button("👤 PVهای ثبت‌شده", "author:pvs:0", "primary"), button("🛡 گزارش امنیتی", "author:security:0", "danger")],
-      [button("📤 بارگذاری دیتابیس", "db:install", "success"), button("🗑 حذف دیتابیس", "db:delete", "danger")],
-    ];
-    if (!db) rows.splice(0, rows.length, [button("📥 نصب دیتابیس", "db:install", "success")]);
-    return { inline_keyboard: rows };
+  #settingsKeyboard(state) {
+    const cacheEnabled = this.#cacheEnabled(state);
+    const autoUpdate = state.settings?.autoUpdate !== false;
+    const botEnabled = state.settings?.botEnabled !== false;
+    const databaseInstalled = Boolean(this.#db(state));
+    return {
+      inline_keyboard: [
+        [button(`Cache: ${cacheEnabled ? "ON" : "OFF"}`, "settings:toggle:cache", cacheEnabled ? "success" : "danger")],
+        [button(`Auto Update: ${autoUpdate ? "ON" : "OFF"}`, "settings:toggle:auto", autoUpdate ? "success" : "danger")],
+        [button("Clear Cache", "settings:clear-cache", "primary")],
+        [button(databaseInstalled ? "Replace Database" : "Install Database", "settings:install", "success"), button("Delete Database", "settings:delete", "danger")],
+        [button(botEnabled ? "Shutdown Bot" : "Enable Bot", "settings:toggle:bot", botEnabled ? "danger" : "success")],
+      ],
+    };
   }
 
-  async #showStart(state, chatId, isOwner) {
-    if (!this.#db(state)) {
-      const bootstrap = isOwner
-        ? "برای نصب یا جایگزینی دیتابیس، /installDB را بفرست و فایل database.js را مستقیماً به‌صورت Document آپلود کن.\n\nپنل مدیریتی مالک: /author"
-        : "سلام! ربات هنوز راه‌اندازی نشده است.";
-      await this.#send(chatId, bootstrap, state, isOwner ? { reply_markup: this.#ownerKeyboard(state) } : {});
+  #settingsText(state, note = "") {
+    const database = this.#db(state);
+    const botEnabled = state.settings?.botEnabled !== false;
+    const details = [
+      "BOT SETTINGS",
+      "",
+      `Status: ${botEnabled ? "RUNNING" : "SHUTDOWN"}`,
+      `Database: ${database ? `INSTALLED (${database.version || "version unknown"})` : "NOT INSTALLED"}`,
+      `Cache: ${this.#cacheEnabled(state) ? "ENABLED" : "DISABLED"}`,
+      `Auto Update: ${state.settings?.autoUpdate !== false ? "ENABLED" : "DISABLED"}`,
+    ];
+    if (note) details.push("", note);
+    return details.join("\n");
+  }
+
+  async #syncCommandMenu(state, ownerChatId = "") {
+    await this.#telegram(state, "deleteMyCommands", {}, { bypassLocalRate: true });
+    for (const scope of ["all_private_chats", "all_group_chats", "all_chat_administrators"]) {
+      await this.#telegram(state, "deleteMyCommands", { scope: { type: scope } }, { bypassLocalRate: true });
+    }
+    const ownerId = String(ownerChatId || this.#ownerId(state) || "");
+    if (!ownerId || !/^\d{1,20}$/.test(ownerId)) return;
+    await this.#telegram(state, "deleteMyCommands", { scope: { type: "chat", chat_id: Number(ownerId) } }, { bypassLocalRate: true });
+    await this.#telegram(state, "setMyCommands", {
+      scope: { type: "chat", chat_id: Number(ownerId) },
+      commands: [{ command: "settings", description: "Open settings or use /settings install" }],
+    }, { bypassLocalRate: true });
+  }
+
+  async #sendSettingsPanel(state, chatId) {
+    await this.#syncCommandMenu(state, chatId);
+    const result = await this.#send(chatId, this.#settingsText(state), state, { reply_markup: this.#settingsKeyboard(state) });
+    if (result?.ok && result.result?.message_id) {
+      state.settingsMessage = { chatId: String(chatId), messageId: result.result.message_id };
+      await this.#save(state);
+    }
+  }
+
+  async #editSettingsPanel(state, callback, note = "", force = false) {
+    if (!force && state.settings?.autoUpdate === false) return;
+    const message = callback?.message || {};
+    if (message.chat?.id == null || message.message_id == null) return;
+    await this.#telegram(state, "editMessageText", {
+      chat_id: message.chat.id,
+      message_id: message.message_id,
+      text: this.#settingsText(state, note),
+      reply_markup: this.#settingsKeyboard(state),
+      link_preview_options: { is_disabled: true },
+    }, { bypassLocalRate: true });
+  }
+
+  async #handleSettingsCallback(state, callback) {
+    const data = asText(callback.data);
+    const chatId = callback.message.chat.id;
+    if (data === "settings:toggle:cache") {
+      state.settings.cacheEnabled = !this.#cacheEnabled(state);
+      if (!state.settings.cacheEnabled) this.#clearRuntimeCaches();
+      await this.#save(state);
+      await this.#editSettingsPanel(state, callback, "Cache setting saved.");
       return;
     }
-    const key = isOwner ? "startOwner" : "start";
-    const greeting = this.#text(state, key, this.#text(state, "start", "سلام! خوش اومدی."));
-    await this.#send(chatId, greeting, state, isOwner ? { reply_markup: this.#ownerKeyboard(state) } : {});
+    if (data === "settings:toggle:auto") {
+      state.settings.autoUpdate = state.settings.autoUpdate === false;
+      await this.#save(state);
+      await this.#editSettingsPanel(state, callback, "Auto Update setting saved.", true);
+      return;
+    }
+    if (data === "settings:toggle:bot") {
+      state.settings.botEnabled = state.settings.botEnabled === false;
+      await this.#save(state);
+      await this.#editSettingsPanel(state, callback, state.settings.botEnabled ? "Bot enabled." : "Bot shut down. Settings remain available.");
+      if (state.settings.botEnabled) await this.#scheduleNext(state);
+      return;
+    }
+    if (data === "settings:clear-cache") {
+      const removed = this.#clearRuntimeCaches();
+      await this.#save(state);
+      await this.#editSettingsPanel(state, callback, `Runtime cache cleared. ${removed} entries removed.`);
+      return;
+    }
+    if (data === "settings:install") {
+      state.flow = "database_upload";
+      state.settingsMessage = { chatId: String(chatId), messageId: callback.message.message_id };
+      await this.#save(state);
+      await this.#telegram(state, "editMessageText", {
+        chat_id: chatId,
+        message_id: callback.message.message_id,
+        text: "DATABASE INSTALLATION\n\nUpload your database file as a Telegram document. Supported filenames: database.js or database.json. The file must contain data-only JSON (or `export default { ... }`).",
+        reply_markup: { inline_keyboard: [[button("Back to Settings", "settings:refresh", "primary")]] },
+      }, { bypassLocalRate: true });
+      return;
+    }
+    if (data === "settings:delete") {
+      state.deleteDatabasePendingAt = Date.now();
+      await this.#save(state);
+      await this.#telegram(state, "editMessageText", {
+        chat_id: chatId,
+        message_id: callback.message.message_id,
+        text: "DELETE DATABASE?\n\nThis removes the installed database and its database-managed resources. This action cannot be undone.",
+        reply_markup: { inline_keyboard: [[button("Confirm Delete", "settings:delete:confirm", "danger"), button("Cancel", "settings:refresh", "primary")]] },
+      }, { bypassLocalRate: true });
+      return;
+    }
+    if (data === "settings:delete:confirm") {
+      const pendingAt = Number(state.deleteDatabasePendingAt || 0);
+      if (!pendingAt || Date.now() - pendingAt > 120_000) {
+        state.deleteDatabasePendingAt = null;
+        await this.#save(state);
+        await this.#editSettingsPanel(state, callback, "No active database deletion confirmation. Open Delete Database again.");
+        return;
+      }
+      state.deleteDatabasePendingAt = null;
+      const removed = await this.#deleteDatabase(state);
+      await this.#save(state);
+      await this.#editSettingsPanel(state, callback, `Database deleted. ${removed} stored items removed.`);
+      return;
+    }
+    if (data === "settings:refresh") {
+      state.flow = null;
+      state.deleteDatabasePendingAt = null;
+      await this.#save(state);
+      await this.#editSettingsPanel(state, callback, "Settings refreshed.");
+    }
   }
 
   #databaseManifest(database) {
@@ -1269,14 +1496,14 @@ export class ForwardSchedulerRuntime {
   async #installFromTelegramDocument(state, message) {
     const document = message?.document;
     const chatId = message?.chat?.id || this.#ownerId(state);
-    const filename = asText(document?.file_name).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 128);
-    if (!document?.file_id || filename.toLowerCase() !== "database.js") {
-      await this.#send(chatId, "❌ نام فایل باید دقیقاً database.js باشد و فایل را به‌صورت Document ارسال کنی.", state);
+    const filename = asText(document?.file_name).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 128).toLowerCase();
+    if (!document?.file_id || !["database.js", "database.json"].includes(filename)) {
+      await this.#send(chatId, "Invalid file. Upload a Telegram document named database.js or database.json.", state);
       return;
     }
     const declaredSize = Number(document.file_size || 0);
     if (Number.isFinite(declaredSize) && declaredSize > MAX_DATABASE_BYTES) {
-      await this.#send(chatId, `❌ حجم دیتابیس نباید بیشتر از ${MAX_DATABASE_BYTES} بایت باشد.`, state);
+      await this.#send(chatId, "Telegram Bot API file downloads are limited to 20 MB. This file is too large.", state);
       return;
     }
 
@@ -1297,7 +1524,7 @@ export class ForwardSchedulerRuntime {
       const response = await fetch(`${BOT_FILE_API}${token}/${filePath}`, {
         method: "GET",
         redirect: "manual",
-        headers: { accept: "text/javascript, application/javascript, text/plain, application/octet-stream;q=0.9" },
+        headers: { accept: "application/json, text/javascript, text/plain, application/octet-stream;q=0.9" },
         signal: AbortSignal.timeout(DATABASE_DOWNLOAD_TIMEOUT_MS),
       });
       if (response.status >= 300 && response.status < 400) throw new Error("DATABASE_DOWNLOAD_REDIRECT_REJECTED");
@@ -1306,108 +1533,115 @@ export class ForwardSchedulerRuntime {
       await this.#installDatabaseSource(state, source, filename);
     } catch (error) {
       const code = asText(error?.message || error);
-      const reason = code === "DATABASE_TOO_LARGE" ? "حجم فایل از سقف مجاز بیشتر است."
-        : code === "DATABASE_DOWNLOAD_REDIRECT_REJECTED" ? "نشانی دانلود به مقصد دیگری هدایت شد و به دلایل امنیتی رد شد."
-          : code.startsWith("DATABASE_DOWNLOAD_HTTP_") ? "دریافت فایل از تلگرام موفق نبود. دوباره تلاش کن."
-            : code.startsWith("TELEGRAM_GET_FILE_FAILED") ? "تلگرام نتوانست اطلاعات فایل را بازیابی کند."
-              : code === "TELEGRAM_FILE_PATH_INVALID" ? "مسیر فایل دریافتی معتبر نبود."
-                : "ساختار یا نسخهٔ دیتابیس معتبر نیست؛ فایل database.js را بررسی کن.";
-      await this.#send(chatId, renderTemplate(this.#text(state, "install.failed", "❌ نصب دیتابیس انجام نشد: {reason}"), { reason }), state);
+      const reason = code === "DATABASE_TOO_LARGE" ? "Telegram Bot API file downloads are limited to 20 MB."
+        : code === "DATABASE_DOWNLOAD_REDIRECT_REJECTED" ? "The file download redirected to another host and was rejected."
+          : code.startsWith("DATABASE_DOWNLOAD_HTTP_") ? "Telegram could not return the uploaded file. Try again."
+            : code.startsWith("TELEGRAM_GET_FILE_FAILED") ? "Telegram could not prepare this file for download."
+              : code === "TELEGRAM_FILE_PATH_INVALID" ? "Telegram returned an invalid file path."
+                : "The database structure or schema is invalid. The previous database was kept.";
+      await this.#send(chatId, `Database installation failed: ${reason}`, state);
     }
   }
 
   async #installDatabaseSource(state, source, filename = "database.js") {
-    let committed = false;
-    let database = null;
+    const safeFilename = String(filename || "").toLowerCase();
+    let database;
+    let manifest;
     let resourceReport = { created: 0, updated: 0, removed: 0, retained: 0 };
+    const sourceText = String(source ?? "");
+    const sourceBytes = new TextEncoder().encode(sourceText);
+    if (!["database.js", "database.json"].includes(safeFilename)) {
+      await this.#send(this.#ownerId(state), "Database filename must be database.js or database.json.", state);
+      return false;
+    }
+    if (!sourceText || sourceBytes.byteLength > MAX_DATABASE_BYTES) {
+      await this.#send(this.#ownerId(state), "The database file exceeds Telegram's 20 MB download limit or is empty.", state);
+      return false;
+    }
+
+    let newHash = "";
+    const previousManifest = await this.ctx.storage.get("database:v1:manifest");
     try {
-      if (String(filename).toLowerCase() !== "database.js") throw new Error("DATABASE_FILENAME_INVALID");
-      database = parseDatabaseModule(source);
-      const sourceBytes = new TextEncoder().encode(String(source));
+      database = parseDatabaseModule(sourceText);
       const digest = await crypto.subtle.digest("SHA-256", sourceBytes);
-      const databaseHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-      const backupFields = ["db", "dbUrl", "dbFileName", "dbHash", "dbInstalledAt", "dbManifest", "resourceRegistry", "pendingResourceCleanup", "pendingResourceKeyCleanup", "maintenanceNextAt", "maintenanceCursor", "flow"];
-      const previous = Object.fromEntries(backupFields.map((field) => [field, structuredClone(state[field])]));
-      await this.ctx.storage.put("database:backup:v5", { targetHash: databaseHash, savedAt: Date.now(), previous });
+      newHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      manifest = await this.#storeDatabaseChunks(sourceText, newHash, safeFilename);
       resourceReport = await this.#reconcileDatabaseResources(state, database);
 
       state.db = database;
       state.dbUrl = null;
-      state.dbFileName = "database.js";
-      state.dbHash = databaseHash;
+      state.dbFileName = safeFilename;
+      state.dbHash = newHash;
       state.dbInstalledAt = Date.now();
       state.dbManifest = this.#databaseManifest(database);
       state.maintenanceNextAt = Date.now() + clampNumber(database.runtime?.maintenance?.sweepIntervalMinutes, 30, 5, 1_440) * 60_000;
       state.maintenanceCursor = null;
       state.flow = null;
-      // Commit the new declarative database and remove its rollback marker atomically.
       await this.ctx.storage.transaction(async (txn) => {
-        await txn.put("state", state);
-        await txn.delete("database:backup:v5");
+        await txn.put("database:v1:manifest", manifest);
+        await txn.put("state", this.#persistableState(state));
       });
       this.pendingState = null;
-      committed = true;
-    } catch (error) {
-      if (!committed) {
-        const backup = await this.ctx.storage.get("database:backup:v5");
-        if (backup?.previous) {
-          Object.assign(state, backup.previous);
-          await this.ctx.storage.transaction(async (txn) => {
-            await txn.put("state", state);
-            await txn.delete("database:backup:v5");
-          });
-          this.pendingState = null;
-        }
-        const code = asText(error?.message || error);
-        const reason = code === "DATABASE_TOO_LARGE" ? "حجم فایل از سقف مجاز بیشتر است."
-          : code === "DATABASE_FILENAME_INVALID" ? "نام فایل باید دقیقاً database.js باشد."
-            : code.startsWith("resource_") ? "ظرفیت منابع دیتابیس با محدودیت‌های ذخیره‌سازی سازگار نیست."
-              : "ساختار، schema یا تنظیمات دیتابیس معتبر نیست؛ نسخهٔ قبلی حفظ شد.";
-        console.error("Database installation rejected", code.slice(0, 100));
-        await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "install.failed", "❌ نصب دیتابیس انجام نشد: {reason}"), { reason }), state);
+      this.databaseCacheHash = newHash;
+      this.databaseCache = database;
+      if (previousManifest?.hash && previousManifest.hash !== newHash) {
+        await this.#removeDatabaseChunks(previousManifest.hash).catch((cleanupError) => {
+          console.error("Previous database chunk cleanup deferred", asText(cleanupError?.message || cleanupError).slice(0, 120));
+        });
       }
-      return;
+    } catch (error) {
+      this.pendingState = null;
+      if (newHash) await this.#removeDatabaseChunks(newHash).catch(() => {});
+      const code = asText(error?.message || error);
+      const reason = code === "database_size_invalid" ? "The file exceeds the supported download size."
+        : code.startsWith("resource_") ? "A database resource configuration is outside the supported storage limits."
+          : code === "DATABASE_STORAGE_CHUNK_MISSING" || code === "DATABASE_STORAGE_HASH_MISMATCH" ? "The uploaded data could not be verified after storage."
+            : "The database schema or data-only JSON structure is invalid.";
+      console.error("Database installation rejected", code.slice(0, 120));
+      await this.#send(this.#ownerId(state), `Database installation failed: ${reason} The previously installed database remains active.`, state);
+      return false;
     }
 
-    // Post-commit work is deliberately isolated: cleanup or Telegram notification
-    // failures cannot falsely roll back a database that has already committed.
-    let cleanupWarning = false;
     try {
-      resourceReport.removed += await this.#completeResourceCleanup(state);
+      await this.#completeResourceCleanup(state);
       await this.#scheduleNext(state);
     } catch (cleanupError) {
-      cleanupWarning = true;
-      console.error("Database post-commit maintenance deferred", asText(cleanupError?.message || cleanupError).slice(0, 120));
+      console.error("Database post-install maintenance deferred", asText(cleanupError?.message || cleanupError).slice(0, 120));
       state.maintenanceNextAt = Date.now() + 60_000;
       await this.#save(state);
     }
-    const suffix = cleanupWarning || state.pendingResourceCleanup.length || state.pendingResourceKeyCleanup.length
-      ? "\n⚠️ پاک‌سازی برخی منابع در صف اجرای مرحله‌ای قرار گرفت."
-      : "";
-    const message = renderTemplate(this.#text(state, "install.success", "✅ دیتابیس {version} نصب شد. قوانین: {rules}؛ حافظه‌ها: {created} ساخته، {updated} به‌روزرسانی، {removed} پاک‌سازی."), {
-      version: database.version || "بدون نسخه",
-      rules: database.features?.chatbot?.rules?.length || 0,
-      created: resourceReport.created,
-      updated: resourceReport.updated,
-      removed: resourceReport.removed,
-    });
-    try {
-      const notify = await this.#send(this.#ownerId(state), `${message}${suffix}`, state, { reply_markup: this.#ownerKeyboard(state) });
-      if (!notify.ok) console.error("Database installed; owner notification was not delivered", notify.error_code || 0);
-    } catch (notifyError) {
-      console.error("Database installed; owner notification failed", asText(notifyError?.message || notifyError).slice(0, 100));
-    }
-  }
 
-  async #refreshDatabase(state) {
-    state.flow = "database_upload";
-    await this.#save(state);
-    await this.#send(this.#ownerId(state), this.#text(state, "install.prompt", "برای به‌روزرسانی، نسخهٔ جدید database.js را مستقیماً به‌صورت Document آپلود کن."), state);
+    const message = [
+      "DATABASE INSTALLED",
+      `Version: ${database.version || "unknown"}`,
+      `File size: ${sourceBytes.byteLength.toLocaleString("en-US")} bytes`,
+      `Rules: ${database.features?.chatbot?.rules?.length || 0}`,
+      `Resources created: ${resourceReport.created}`,
+      `Resources updated: ${resourceReport.updated}`,
+      `Resources removed: ${resourceReport.removed}`,
+    ].join("\n");
+    await this.#send(this.#ownerId(state), message, state);
+    const panel = state.settingsMessage;
+    if (state.settings?.autoUpdate !== false && panel?.chatId && panel?.messageId) {
+      await this.#telegram(state, "editMessageText", {
+        chat_id: panel.chatId,
+        message_id: panel.messageId,
+        text: this.#settingsText(state, "Database installed successfully."),
+        reply_markup: this.#settingsKeyboard(state),
+      }, { bypassLocalRate: true });
+    }
+    return true;
   }
 
   async #deleteDatabase(state) {
-    const deletedMessage = this.#text(state, "install.deleted", "🗑 دیتابیس حذف شد. منابع و حافظه‌های متعلق به دیتابیس نیز پاک‌سازی شدند. برای نصب دیتابیس جدید /installDB را بفرست.");
     const cleanup = await this.#reconcileDatabaseResources(state, null);
+    let chunkCount = 0;
+    while (true) {
+      const databaseRows = await this.ctx.storage.list({ prefix: "database:", limit: 1_000 });
+      if (!databaseRows.size) break;
+      chunkCount += await this.ctx.storage.delete([...databaseRows.keys()]);
+      if (databaseRows.size < 1_000) break;
+    }
     state.db = null;
     state.dbManifest = null;
     state.dbUrl = null;
@@ -1418,357 +1652,29 @@ export class ForwardSchedulerRuntime {
     state.maintenanceCursor = null;
     state.flow = null;
     state.forwardDraft = null;
-    // Ownership, groups/channels/PVs, group settings, schedule history and security audit survive DB removal.
+    this.databaseCacheHash = "";
+    this.databaseCache = null;
+    this.#clearRuntimeCaches();
     await this.#save(state);
     cleanup.removed += await this.#completeResourceCleanup(state);
     state.resourceRegistry = {};
     await this.#save(state);
     await this.#scheduleNext(state);
-    const pendingText = state.pendingResourceCleanup.length ? " پاک‌سازی بقیه منابع به‌صورت خودکار ادامه می‌یابد." : "";
-    await this.#send(this.#ownerId(state), `${deletedMessage} (${cleanup.removed} مورد پاک‌سازی شد).${pendingText}`, state);
-  }
-
-  async #loadFlowPrompt(state, key, fallback) {
-    await this.#send(this.#ownerId(state), this.#text(state, key, fallback), state);
-  }
-
-  async #beginForward(state) {
-    if (!this.#db(state)) {
-      await this.#send(this.#ownerId(state), "ابتدا دیتابیس را با /installDB نصب کن.", state);
-      return;
-    }
-    if (!this.#featureEnabled(state, "forwarding")) {
-      await this.#send(this.#ownerId(state), this.#text(state, "forward.disabled", "قابلیت فوروارد در دیتابیس غیرفعال شده است."), state);
-      return;
-    }
-    if (state.forwardTask?.active) {
-      await this.#send(this.#ownerId(state), this.#text(state, "forward.alreadyActive", "یک زمان‌بندی فعال است؛ ابتدا آن را از پنل متوقف کن."), state);
-      return;
-    }
-    state.flow = "forward_source";
-    state.forwardDraft = {};
-    await this.#save(state);
-    await this.#loadFlowPrompt(state, "forward.askSource", "لینک پست مبدأ را بفرست؛ نمونه: https://t.me/channel/123");
-  }
-
-  async #forwardFlowText(state, text) {
-    const db = this.#db(state);
-    const draft = state.forwardDraft || {};
-    if (state.flow === "forward_source") {
-      const parsed = parseMessageLink(text);
-      if (!parsed) {
-        await this.#loadFlowPrompt(state, "forward.badSource", "❌ لینک پیام معتبر نیست.");
-        return;
-      }
-      const [sourceChatId, messageId] = parsed;
-      const chat = await this.#telegram(state, "getChat", { chat_id: sourceChatId }, { bypassLocalRate: true });
-      if (!chat.ok || !["channel", "group", "supergroup"].includes(chat.result?.type)) {
-        await this.#loadFlowPrompt(state, "forward.sourceUnavailable", "ربات به کانال یا گروه مبدأ دسترسی ندارد یا لینک معتبر نیست.");
-        return;
-      }
-      const me = await this.#telegram(state, "getMe", {}, { bypassLocalRate: true });
-      const member = me.ok ? await this.#telegram(state, "getChatMember", { chat_id: chat.result.id, user_id: me.result.id }, { bypassLocalRate: true }) : { ok: false };
-      if (!member.ok || ["left", "kicked"].includes(member.result?.status)) {
-        await this.#loadFlowPrompt(state, "forward.joinSource", "ربات را به کانال مبدأ اضافه کن؛ سپس دوباره لینک را بفرست.");
-        return;
-      }
-      if (chat.result.has_protected_content) {
-        await this.#loadFlowPrompt(state, "forward.protected", "تلگرام فوروارد محتوای محافظت‌شده را مجاز نمی‌کند.");
-        return;
-      }
-      draft.sourceChatId = chat.result.id;
-      draft.sourceUsername = chat.result.username || null;
-      draft.sourceTitle = chat.result.title || "کانال مبدأ";
-      draft.messageId = messageId;
-      state.forwardDraft = draft;
-      state.flow = "forward_target";
-      await this.#save(state);
-      await this.#loadFlowPrompt(state, "forward.askTarget", "لینک یا @username کانال مقصد را بفرست.");
-      return;
-    }
-
-    if (state.flow === "forward_target") {
-      const username = parsePublicChannel(text);
-      const targetRef = isTelegramId(text) ? text : (username ? `@${username}` : null);
-      if (!targetRef) {
-        await this.#loadFlowPrompt(state, "forward.badTarget", "❌ مقصد معتبر نیست؛ @username یا شناسه عددی گروه/کانال را بفرست.");
-        return;
-      }
-      const target = await this.#telegram(state, "getChat", { chat_id: targetRef }, { bypassLocalRate: true });
-      if (!target.ok || !["group", "supergroup"].includes(target.result?.type)) {
-        await this.#loadFlowPrompt(state, "forward.targetUnavailable", "❌ مقصد باید گروه یا سوپرگروهی باشد که ربات به آن دسترسی دارد؛ انتشار در کانال غیرفعال است.");
-        return;
-      }
-      if (String(target.result.id) === String(draft.sourceChatId)) {
-        await this.#loadFlowPrompt(state, "forward.sameTarget", "❌ مبدأ و مقصد نمی‌توانند یکسان باشند.");
-        return;
-      }
-      const me = await this.#telegram(state, "getMe", {}, { bypassLocalRate: true });
-      const member = me.ok ? await this.#telegram(state, "getChatMember", { chat_id: target.result.id, user_id: me.result.id }, { bypassLocalRate: true }) : { ok: false };
-      const isPresentInGroup = !["left", "kicked"].includes(member.result?.status);
-      if (!member.ok || !isPresentInGroup) {
-        await this.#loadFlowPrompt(state, "forward.targetPermission", "ربات باید عضو گروه مقصد باشد؛ انتشار مستقیم در کانال پشتیبانی نمی‌شود.");
-        return;
-      }
-      draft.targetChatId = target.result.id;
-      draft.targetUsername = target.result.username || null;
-      draft.targetTitle = target.result.title || target.result.username || String(target.result.id);
-      draft.targetType = "group";
-      state.forwardDraft = draft;
-      state.flow = "forward_interval";
-      await this.#save(state);
-      await this.#loadFlowPrompt(state, "forward.askInterval", "فاصله ارسال را به میلی‌ثانیه وارد کن؛ حداقل پیش‌فرض 10000 است.");
-      return;
-    }
-
-    if (state.flow === "forward_interval") {
-      const interval = parseIntervalInput(text);
-      const limits = db?.forwarding || {};
-      const minimum = clampNumber(limits.minIntervalMs, 10_000, 10_000, 3_600_000);
-      const maximum = clampNumber(limits.maxIntervalMs, 31_536_000_000, minimum, 31_536_000_000);
-      if (interval == null || interval < minimum || interval > maximum) {
-        await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "forward.intervalInvalid", "فاصله باید بین {min} و {max} میلی‌ثانیه باشد."), { min: minimum, max: maximum }), state);
-        return;
-      }
-      draft.intervalMs = interval;
-      state.forwardDraft = draft;
-      state.flow = "forward_count";
-      await this.#save(state);
-      await this.#loadFlowPrompt(state, "forward.askCount", "تعداد فوروارد را وارد کن؛ برای ادامه نامحدود بنویس: auto");
-      return;
-    }
-
-    if (state.flow === "forward_count") {
-      const normalized = normalizeText(text);
-      const infinite = ["auto", "infinite", "نامحدود", "بی نهایت", "∞"].includes(normalized);
-      const count = infinite ? null : parseIntervalInput(text);
-      const maxCount = clampNumber(db?.forwarding?.maxCount, 100_000, 1, Number.MAX_SAFE_INTEGER);
-      if (!infinite && (!count || count < 1 || count > maxCount)) {
-        await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "forward.countInvalid", "تعداد باید بین 1 تا {max} یا auto باشد."), { max: maxCount }), state);
-        return;
-      }
-      const now = Date.now();
-      state.forwardTask = {
-        active: true,
-        sourceChatId: draft.sourceChatId,
-        sourceUsername: draft.sourceUsername,
-        sourceTitle: draft.sourceTitle,
-        messageId: draft.messageId,
-        targetChatId: draft.targetChatId,
-        targetUsername: draft.targetUsername,
-        targetTitle: draft.targetTitle || draft.targetUsername || String(draft.targetChatId),
-        targetType: "group",
-        intervalMs: draft.intervalMs,
-        remaining: count,
-        sent: 0,
-        nextAt: now + 1_000,
-        failures: 0,
-      };
-      state.forwardDraft = null;
-      state.flow = null;
-      await this.#save(state);
-      await this.ctx.storage.setAlarm(now + 1_000);
-      await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "forward.started", "🚀 زمان‌بندی فعال شد.\nمبدأ: {source}\nمقصد: {target}\nفاصله: {interval} ms\nتعداد: {count}"), {
-        source: draft.sourceUsername ? `@${draft.sourceUsername}` : draft.sourceTitle,
-        target: draft.targetUsername ? `@${draft.targetUsername}` : draft.targetTitle,
-        interval: draft.intervalMs,
-        count: infinite ? "نامحدود" : count,
-      }), state, { reply_markup: { inline_keyboard: [[button(this.#text(state, "ui.stopForward", "⏹ توقف فوروارد"), "forward:stop", "danger")]] } });
-    }
-  }
-
-  async #stopForward(state) {
-    if (!state.forwardTask?.active) {
-      await this.#send(this.#ownerId(state), this.#text(state, "forward.notActive", "زمان‌بندی فعالی وجود ندارد."), state);
-      return;
-    }
-    state.forwardTask.active = false;
-    state.forwardTask.stoppedAt = Date.now();
-    await this.#save(state);
-    await this.#scheduleNext(state);
-    await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "forward.stopped", "⏹ فوروارد متوقف شد؛ ارسال موفق: {sent}"), { sent: state.forwardTask.sent }), state);
-  }
-
-  #authorHomeKeyboard() {
-    return { inline_keyboard: [
-      [button("🧩 روشن/خاموش قابلیت‌ها", "author:modules:0", "primary")],
-      [button("👥 گروه‌ها", "author:groups:0", "success"), button("📢 کانال‌ها", "author:channels:0", "primary")],
-      [button("👤 PVهای ثبت‌شده", "author:pvs:0", "primary"), button("🛡 گزارش امنیتی", "author:security:0", "danger")],
-      [button("📣 پیام همگانی به گروه‌ها", "author:broadcast", "success")],
-      [button("🔌 اتصال دوباره به تلگرام", "author:webhook", "primary")],
-      [button("📖 راهنمای دستورات مالک", "author:help", "primary")],
-    ] };
-  }
-
-  #modulePageKeyboard(state, page) {
-    const pageData = paginateModules(page, 6);
-    const rows = [];
-    for (const module of pageData.items) {
-      const enabled = this.#featureEnabled(state, module.id);
-      rows.push([
-        button(`ℹ️ ${module.title}`.slice(0, 64), `m5:view:${module.id}:${pageData.page}`, "primary"),
-        button(`${enabled ? "🟢 روشن" : "🔴 خاموش"}`, `m5:toggle:${module.id}:${pageData.page}`, enabled ? "success" : "danger"),
-      ]);
-    }
-    const navigation = [];
-    if (pageData.hasPrevious) navigation.push(button("⬅️ صفحه قبل", `author:modules:${pageData.page - 1}`, "primary"));
-    if (pageData.hasNext) navigation.push(button("صفحه بعد ➡️", `author:modules:${pageData.page + 1}`, "primary"));
-    if (navigation.length) rows.push(navigation);
-    return { inline_keyboard: rows };
-  }
-
-  #modulePageText(state, page) {
-    const pageData = paginateModules(page, 6);
-    const lines = pageData.items.map((module) => `${this.#featureEnabled(state, module.id) ? "🟢 روشن" : "🔴 خاموش"} — ${module.title}\n${module.description || module.category}`);
-    return `🧩 راهنمای هوشمند و مدیریت ماژول‌ها\nصفحه ${pageData.page + 1} از ${pageData.totalPages}\nروی هر دکمه بزن تا همان قابلیت فوراً روشن/خاموش شود. وضعیت جدید ذخیره می‌شود.\n\n${lines.join("\n\n")}`;
-  }
-
-  #moduleDetailText(state, moduleId) {
-    const descriptor = getFeatureModule(moduleId);
-    if (!descriptor) return "قابلیت موردنظر شناخته نشد.";
-    const enabled = this.#featureEnabled(state, moduleId);
-    const config = getModuleConfig(this.#db(state), moduleId) || {};
-    const settings = Object.entries(config).filter(([key]) => key !== "rules" && key !== "items" && key !== "responses")
-      .slice(0, 18).map(([key, value]) => {
-        let rendered;
-        if (Array.isArray(value)) rendered = `فهرست (${value.length} مورد)`;
-        else if (value && typeof value === "object") rendered = `تنظیمات (${Object.keys(value).length} کلید)`;
-        else if (typeof value === "boolean") rendered = value ? "روشن" : "خاموش";
-        else rendered = String(value).slice(0, 80);
-        return `• ${key}: ${rendered}`;
-      });
-    return `🧩 ${descriptor.title}
-وضعیت: ${enabled ? "🟢 روشن" : "🔴 خاموش"}
-توضیح: ${descriptor.description}
-مسیر تنظیمات: ${descriptor.settingsPath}
-مجوز موردنیاز: ${descriptor.requiredPermission}
-نوع اجرا: ${descriptor.executionType}
-
-تنظیمات فعلی در دیتابیس:
-${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}`;
-  }
-
-  async #showModuleDetail(state, moduleId, page = 0, callback = null) {
-    const descriptor = getFeatureModule(moduleId);
-    if (!descriptor) {
-      await this.#answerCallback(callback?.id, "این قابلیت در نسخهٔ فعلی وجود ندارد.");
-      return;
-    }
-    const enabled = this.#featureEnabled(state, moduleId);
-    const text = this.#moduleDetailText(state, moduleId);
-    const replyMarkup = { inline_keyboard: [
-      [button(enabled ? "🔴 خاموش‌کردن قابلیت" : "🟢 روشن‌کردن قابلیت", `m5:toggle:${moduleId}:${page}`, enabled ? "danger" : "success")],
-      [button("↩️ بازگشت به فهرست قابلیت‌ها", `author:modules:${page}`, "secondary")],
-      [button("↩️ پنل مالک", "author:home", "secondary")],
-    ] };
-    if (callback?.message?.chat?.id && callback?.message?.message_id) {
-      const edited = await this.#telegram(state, "editMessageText", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, text, reply_markup: replyMarkup }, { bypassLocalRate: true });
-      if (edited.ok) return;
-    }
-    await this.#send(this.#ownerId(state), text, state, { reply_markup: replyMarkup });
-  }
-
-  async #showModulePage(state, page, callback = null) {
-    const text = this.#modulePageText(state, page);
-    const replyMarkup = this.#modulePageKeyboard(state, page);
-    if (callback?.message?.chat?.id && callback?.message?.message_id) {
-      const edited = await this.#telegram(state, "editMessageText", {
-        chat_id: callback.message.chat.id,
-        message_id: callback.message.message_id,
-        text,
-        reply_markup: replyMarkup,
-      }, { bypassLocalRate: true });
-      if (edited.ok) return;
-    }
-    await this.#send(this.#ownerId(state), text, state, { reply_markup: replyMarkup });
-  }
-
-  async #showGroupsPage(state, page = 0, callback = null) {
-    const entries = Object.values(state.groups || {}).sort((a, b) => Number(b.lastSeenAt || 0) - Number(a.lastSeenAt || 0));
-    const pageSize = 8;
-    const totalPages = Math.max(1, Math.ceil(entries.length / pageSize));
-    const current = Math.max(0, Math.min(totalPages - 1, Math.floor(Number(page) || 0)));
-    const selected = entries.slice(current * pageSize, current * pageSize + pageSize);
-    const lines = selected.map((group) => {
-      const usage = Number(state.groupUsage?.[String(group.id)] || 0);
-      const link = group.username ? `https://t.me/${group.username}` : (group.inviteLinkValid && group.inviteLink ? group.inviteLink : "لینک در دسترس نیست");
-      const rights = group.rights || {};
-      const access = Object.entries(rights).map(([key, value]) => `${key}:${value === true ? "بله" : value === false ? "خیر" : "نامشخص"}`).join("، ") || "نامشخص";
-      return `• ${asText(group.title || group.id).slice(0, 70)}\n  لینک: ${link}\n  ID: ${group.id} | نوع: ${group.type || "نامشخص"}\n  وضعیت ربات: ${asText(group.botStatus || "نامشخص")}\n  اعضای گزارش‌شده توسط تلگرام: ${Number.isInteger(group.lastMemberCount) ? group.lastMemberCount : "نامشخص"}\n  Updateهای پردازش‌شده توسط ربات: ${usage}\n  مجوزهای واقعی: ${access}`;
-    });
-    const keyboard = [];
-    for (const group of selected) keyboard.push([button(`🔎 ${asText(group.title || group.id).slice(0, 45)}`, `group:view:${group.id}`, "secondary")]);
-    const nav = [];
-    if (current > 0) nav.push(button("⬅️ صفحه قبل", `author:groups:${current - 1}`, "primary"));
-    if (current < totalPages - 1) nav.push(button("صفحه بعد ➡️", `author:groups:${current + 1}`, "primary"));
-    if (nav.length) keyboard.push(nav);
-    keyboard.push([button("↩️ بازگشت به پنل مالک", "author:home", "secondary")]);
-    const text = `👥 گروه‌های شناخته‌شده: ${entries.length}\nصفحه ${current + 1} از ${totalPages}\n\n${lines.join("\n\n") || "هنوز هیچ گروهی پیام یا رویدادی برای ربات نفرستاده است."}`;
-    if (callback?.message?.chat?.id && callback?.message?.message_id) {
-      const edited = await this.#telegram(state, "editMessageText", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, text, reply_markup: { inline_keyboard: keyboard } }, { bypassLocalRate: true });
-      if (edited.ok) return;
-    }
-    await this.#send(this.#ownerId(state), text, state, { reply_markup: { inline_keyboard: keyboard } });
-  }
-
-  async #showRegistryPage(state, type, page = 0, callback = null) {
-    const pageSize = 8;
-    let entries = [];
-    let heading = "";
-    if (type === "channels") {
-      entries = [...(state.channels || [])].sort((a, b) => Number(b.lastSeenAt || 0) - Number(a.lastSeenAt || 0));
-      heading = `📢 کانال‌های ثبت‌شده: ${entries.length}`;
-    } else if (type === "pvs") {
-      entries = Object.values(state.pvUsers || {}).sort((a, b) => Number(b.lastSeenAt || 0) - Number(a.lastSeenAt || 0));
-      heading = `👤 کاربران خصوصی مشاهده‌شده: ${entries.length}`;
-    } else if (type === "security") {
-      entries = [...(state.securityAudit || [])].sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
-      heading = `🛡 رویدادهای امنیتی ثبت‌شده: ${entries.length}`;
-    } else return;
-    const totalPages = Math.max(1, Math.ceil(entries.length / pageSize));
-    const current = Math.max(0, Math.min(totalPages - 1, Math.floor(Number(page) || 0)));
-    const selected = entries.slice(current * pageSize, current * pageSize + pageSize);
-    let lines = [];
-    if (type === "channels") {
-      lines = selected.map((item) => {
-        const permissions = Object.entries(item.permissions || {}).map(([key, value]) => `${key}: ${value === true ? "بله" : value === false ? "خیر" : "نامشخص"}`).join("، ") || "نامشخص";
-        return `• ${asText(item.title || item.id)}\nشناسه: ${item.id} | وضعیت: ${item.botStatus || "نامشخص"}\nلینک: ${item.username ? `https://t.me/${item.username}` : "خصوصی؛ لینک در دسترس نیست"}\nدسترسی‌های ثبت‌شده از API: ${permissions}`;
-      });
-    } else if (type === "pvs") {
-      lines = selected.map((item) => {
-        const name = [item.firstName, item.lastName].filter(Boolean).join(" ") || "کاربر";
-        const username = item.username ? `@${item.username} (https://t.me/${item.username})` : "نام کاربری ثبت نشده";
-        return `• ${name}\nنام کاربری: ${username}\nشناسه: ${item.id}\nآخرین مشاهده: ${new Date(Number(item.lastSeenAt || 0)).toLocaleString("fa-IR")}\nUpdateهای خصوصی پردازش‌شده: ${Number(item.updateCount || 0)}`;
-      });
-    } else {
-      lines = selected.map((item) => `• ${item.kind || "هشدار"} | گروه: ${item.chatTitle || item.chatId || "نامشخص"} (${item.chatId || "—"})\nزمان: ${new Date(Number(item.at || 0)).toLocaleString("fa-IR")}\nعلت: ${item.reason || "نامشخص"} | رویدادها: ${Number(item.count || 1)}\nکاربران مشکوک: ${(item.userIds || []).join(", ") || "ثبت نشده"}\nاقدام واقعی: ${item.action || "بدون اقدام"}`);
-    }
-    const keyboard = [];
-    const nav = [];
-    if (current > 0) nav.push(button("⬅️ صفحه قبل", `author:${type}:${current - 1}`, "primary"));
-    if (current < totalPages - 1) nav.push(button("صفحه بعد ➡️", `author:${type}:${current + 1}`, "primary"));
-    if (nav.length) keyboard.push(nav);
-    keyboard.push([button("↩️ بازگشت به پنل مالک", "author:home", "secondary")]);
-    const text = `${heading}\nصفحه ${current + 1} از ${totalPages}\n\n${lines.join("\n\n") || "موردی ثبت نشده است."}`;
-    if (callback?.message?.chat?.id && callback?.message?.message_id) {
-      const edited = await this.#telegram(state, "editMessageText", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, text, reply_markup: { inline_keyboard: keyboard } }, { bypassLocalRate: true });
-      if (edited.ok) return;
-    }
-    await this.#send(this.#ownerId(state), text, state, { reply_markup: { inline_keyboard: keyboard } });
+    return cleanup.removed + chunkCount;
   }
 
   async #handleGroupControlCallback(state, callback) {
     const data = asText(callback.data);
     const chat = callback.message?.chat;
     if (!isGroup(chat)) {
-      await this.#answerCallback(callback.id, "این دکمه فقط در همان گروه قابل استفاده است.");
+      await this.#answerCallback(callback.id, "This button is available only in its original group.");
       return;
     }
     const chatId = String(chat.id);
     const userId = String(callback.from?.id || "");
     const allowed = this.#isOwner(userId, state) || await this.#isTelegramAdmin(state, userId, chatId);
     if (!allowed) {
-      await this.#answerCallback(callback.id, this.#text(state, "group.adminOnly", "این فرمان فقط برای مدیر واقعی گروه مجاز است."));
+      await this.#answerCallback(callback.id, this.#text(state, "group.adminOnly", "Only a verified group administrator can use this command."));
       return;
     }
     if (data.startsWith("group:bot:") || data.startsWith("g5:")) {
@@ -1776,15 +1682,15 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       const action = data.startsWith("g5:") ? parts[1] : parts[2];
       const targetChatId = data.startsWith("g5:") ? parts[2] : parts[3];
       if (String(targetChatId) !== chatId || !["on", "off"].includes(action)) {
-        await this.#answerCallback(callback.id, "دکمه به گروه دیگری تعلق دارد.");
+        await this.#answerCallback(callback.id, "This button belongs to another group.");
         return;
       }
       state.groupSettings[chatId] ||= {};
       state.groupSettings[chatId].botEnabled = action === "on";
       await this.#save(state);
-      await this.#answerCallback(callback.id, action === "on" ? "پاسخ‌های ربات روشن شد." : "پاسخ‌های ربات خاموش شد.");
-      await this.#send(chat.id, this.#text(state, action === "on" ? "group.botOn" : "group.botOff", action === "on" ? "✅ ربات روشن شد." : "🔕 پاسخ‌های عادی ربات خاموش شد."), state, {
-        reply_markup: { inline_keyboard: [[button("🟢 روشن", `g5:on:${chatId}`, "success"), button("🔴 خاموش", `g5:off:${chatId}`, "danger")]] },
+      await this.#answerCallback(callback.id, action === "on" ? "Bot replies enabled." : "Bot replies disabled.");
+      await this.#send(chat.id, this.#text(state, action === "on" ? "group.botOn" : "group.botOff", action === "on" ? "Bot replies are now enabled." : "Bot replies are now disabled."), state, {
+        reply_markup: { inline_keyboard: [[button("Enable", `g5:on:${chatId}`, "success"), button("Disable", `g5:off:${chatId}`, "danger")]] },
       }, { bypassLocalRate: true, group: true });
       return;
     }
@@ -1794,26 +1700,26 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     const nonce = parts[3];
     const draft = state.tagDrafts?.[nonce];
     if (!draft || String(draft.chatId) !== chatId || String(targetChatId) !== chatId || Number(draft.expiresAt || 0) < Date.now()) {
-      await this.#answerCallback(callback.id, "پیش‌نمایش تگ منقضی شده است؛ دوباره /tagall را اجرا کنید.");
+      await this.#answerCallback(callback.id, "This preview has expired. Create a new preview and try again.");
       return;
     }
     if (String(draft.initiatorId) !== userId && !this.#isOwner(userId, state)) {
-      await this.#answerCallback(callback.id, "این پیش‌نمایش را مدیر دیگری ساخته است.");
+      await this.#answerCallback(callback.id, "This preview was created by another administrator.");
       return;
     }
     if (action === "cancel") {
       delete state.tagDrafts[nonce];
       await this.#save(state);
-      await this.#answerCallback(callback.id, "ارسال تگ لغو شد.");
+      await this.#answerCallback(callback.id, "Tagging cancelled.");
       return;
     }
     if (action !== "confirm") {
-      await this.#answerCallback(callback.id, "درخواست نامعتبر است.");
+      await this.#answerCallback(callback.id, "Invalid request.");
       return;
     }
     const cooldown = clampNumber(this.#db(state)?.features?.tagKnownMembers?.cooldownSeconds, 300, 30, 86_400) * 1_000;
     if (Date.now() - Number(state.tagCooldowns[chatId] || 0) < cooldown) {
-      await this.#answerCallback(callback.id, this.#text(state, "group.tagCooldown", "برای تگ‌کردن دوباره باید صبر کنید."));
+      await this.#answerCallback(callback.id, this.#text(state, "group.tagCooldown", "Please wait before creating another tag preview."));
       return;
     }
     const currentKnown = new Set((state.knownMembers[chatId] || []).filter((item) => !item.isBot && !state.tagOptOut[`${chatId}:${item.id}`]).map((item) => String(item.id)));
@@ -1821,7 +1727,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     if (!ids.length) {
       delete state.tagDrafts[nonce];
       await this.#save(state);
-      await this.#answerCallback(callback.id, "کاربر قابل‌تگی باقی نمانده است.");
+      await this.#answerCallback(callback.id, "No eligible members remain in this preview.");
       return;
     }
     const known = new Map((state.knownMembers[chatId] || []).map((item) => [String(item.id), item]));
@@ -1831,10 +1737,10 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       const batch = ids.slice(index, index + batchSize);
       const mentions = batch.map((id) => {
         const member = known.get(String(id)) || {};
-        const name = [member.firstName, member.lastName].filter(Boolean).join(" ") || `کاربر ${id}`;
+        const name = [member.firstName, member.lastName].filter(Boolean).join(" ") || `User ${id}`;
         const safeName = name.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
         return `<a href="tg://user?id=${id}">${safeName}</a>`;
-      }).join("، ");
+      }).join(", ");
       const result = await this.#send(chat.id, `👋 ${mentions}`, state, { parse_mode: "HTML" }, { bypassLocalRate: true, group: true });
       if (result.ok) attempted += batch.length;
       if (!result.ok) break;
@@ -1842,8 +1748,8 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     state.tagCooldowns[chatId] = Date.now();
     delete state.tagDrafts[nonce];
     await this.#save(state);
-    await this.#answerCallback(callback.id, `تلاش برای تگ ${attempted} عضو انجام شد.`);
-    await this.#send(chat.id, renderTemplate(this.#text(state, "group.tagDone", "✅ تگ کاربران شناخته‌شده ارسال شد: {count}"), { count: attempted }), state, {}, { bypassLocalRate: true, group: true });
+    await this.#answerCallback(callback.id, `Tagging attempted for ${attempted} members.`);
+    await this.#send(chat.id, renderTemplate(this.#text(state, "group.tagDone", "✅ Tags sent to {count} known members."), { count: attempted }), state, {}, { bypassLocalRate: true, group: true });
   }
 
   async #handleCaptchaCallback(state, callback) {
@@ -1852,17 +1758,17 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     const userId = parts[2];
     const nonce = parts[3];
     if (!callback.message?.chat || String(callback.message.chat.id) !== String(chatId) || !isGroup(callback.message.chat)) {
-      await this.#answerCallback(callback.id, "درخواست تأیید به گروه معتبر متصل نیست.");
+      await this.#answerCallback(callback.id, "The verification request is not linked to a valid group.");
       return true;
     }
     if (String(callback.from?.id) !== userId) {
-      await this.#answerCallback(callback.id, "این دکمه برای عضو دیگری است.");
+      await this.#answerCallback(callback.id, "This button belongs to another member.");
       return true;
     }
     const key = `${chatId}:${userId}`;
     const pending = state.pendingVerifications?.[key];
     if (!pending || String(pending.nonce) !== nonce || Number(pending.expiresAt || 0) < Date.now()) {
-      await this.#answerCallback(callback.id, "مهلت تأیید تمام شده است؛ دوباره وارد گروه شو یا از مدیر کمک بگیر.");
+      await this.#answerCallback(callback.id, "Verification expired. Rejoin the group or contact an administrator.");
       return true;
     }
     const unrestricted = await this.#telegram(state, "restrictChatMember", {
@@ -1877,17 +1783,17 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       use_independent_chat_permissions: true,
     }, { bypassLocalRate: true });
     if (!unrestricted.ok) {
-      await this.#answerCallback(callback.id, "تلگرام اجازه آزادسازی عضو را نداد؛ دسترسی مدیریتی ربات را بررسی کنید.");
+      await this.#answerCallback(callback.id, "Telegram could not restore member permissions. Check the bot administrator rights.");
       return true;
     }
     delete state.pendingVerifications[key];
     await this.#save(state);
-    await this.#answerCallback(callback.id, "✅ تأیید شد؛ خوش آمدی!");
+    await this.#answerCallback(callback.id, "Verified. Welcome!");
     if (callback.message?.chat?.id) {
       await this.#telegram(state, "editMessageText", {
         chat_id: callback.message.chat.id,
         message_id: callback.message.message_id,
-        text: "✅ عضویت شما تأیید شد. خوش آمدید!",
+        text: "Your membership has been verified.",
       }, { bypassLocalRate: true });
     }
     return true;
@@ -1903,245 +1809,20 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       await this.#handleGroupControlCallback(state, callback);
       return;
     }
-    const userId = callback.from?.id;
-    if (!this.#isOwner(userId, state) || !isPrivate(callback.message?.chat)) {
-      await this.#answerCallback(callback.id, this.#text(state, "access.denied", "این پنل فقط برای مالک ربات در گفت‌وگوی خصوصی است."));
-      return;
-    }
     await this.#answerCallback(callback.id);
-
-    if (data === "author:home") {
-      await this.#telegram(state, "editMessageText", {
-        chat_id: callback.message.chat.id,
-        message_id: callback.message.message_id,
-        text: "👑 پنل مدیریت مالک\nاز این بخش قابلیت‌ها، گروه‌ها، کانال‌ها و پیام همگانی را مدیریت کن.",
-        reply_markup: this.#authorHomeKeyboard(),
-      }, { bypassLocalRate: true });
-      return;
-    }
-    if (data.startsWith("author:modules:")) {
-      await this.#showModulePage(state, Number(data.split(":")[2]), callback);
-      return;
-    }
-    if (data.startsWith("m5:view:")) {
-      const [, , moduleId, pageText] = data.split(":");
-      await this.#showModuleDetail(state, moduleId, Number(pageText) || 0, callback);
-      return;
-    }
-    if (data.startsWith("m5:toggle:") || data.startsWith("module:toggle:")) {
-      const parts = data.split(":");
-      const moduleId = data.startsWith("m5:") ? parts[2] : parts[2];
-      const pageText = data.startsWith("m5:") ? parts[3] : parts[3];
-      if (!getFeatureModule(moduleId)) return;
-      state.moduleOverrides[moduleId] = !this.#featureEnabled(state, moduleId);
-      const enabled = state.moduleOverrides[moduleId];
-      if (moduleId === "chatter" && !enabled) {
-        for (const groupState of Object.values(state.groupSettings || {})) {
-          groupState.chatterEnabled = false;
-          groupState.chatterNextAt = 0;
-        }
-      }
-      if (moduleId === "forwarding" && !enabled && state.forwardTask?.active) {
-        state.forwardTask.active = false;
-        state.forwardTask.stoppedAt = Date.now();
-      }
-      if (["captcha", "raidProtection"].includes(moduleId) && !enabled) {
-        for (const [key, pending] of Object.entries(state.pendingVerifications || {})) {
-          const [chatId, userId] = key.split(":");
-          await this.#telegram(state, "restrictChatMember", {
-            chat_id: chatId, user_id: Number(userId),
-            permissions: { can_send_messages: true, can_send_audios: true, can_send_documents: true, can_send_photos: true, can_send_videos: true, can_send_video_notes: true, can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true, can_add_web_page_previews: true },
-            use_independent_chat_permissions: true,
-          }, { bypassLocalRate: true });
-          delete state.pendingVerifications[key];
-        }
-      }
-      await this.#save(state);
-      if (data.startsWith("m5:toggle:")) await this.#showModuleDetail(state, moduleId, Number(pageText) || 0, callback);
-      else await this.#showModulePage(state, Number(pageText) || 0, callback);
-      await this.#scheduleNext(state);
-      return;
-    }
-    if (data.startsWith("author:groups:")) {
-      await this.#showGroupsPage(state, Number(data.split(":")[2]), callback);
-      return;
-    }
-    if (data === "author:webhook") {
-      const result = await this.#setWebhook(state);
-      await this.#send(this.#ownerId(state), result.ok
-        ? "✅ اتصال وبهوک تلگرام با نشانی ثابت Worker بازتنظیم شد."
-        : `❌ اتصال مجدد ناموفق بود: ${asText(result.reason || "خطای ناشناخته")}`, state, { reply_markup: this.#authorHomeKeyboard() });
-      return;
-    }
-    if (data.startsWith("author:channels:") || data.startsWith("author:pvs:") || data.startsWith("author:security:")) {
-      const [root, type, pageText] = data.split(":");
-      await this.#showRegistryPage(state, type, Number(pageText) || 0, callback);
-      return;
-    }
-    if (data === "author:channels") {
-      await this.#showRegistryPage(state, "channels", 0, callback);
-      return;
-    }
-    if (data === "author:broadcast") {
-      state.flow = "broadcast_wait";
-      await this.#save(state);
-      await this.#send(this.#ownerId(state), "متن یا رسانه پیام همگانی را بفرست. قبل از ارسال به گروه‌ها، پیش‌نمایش و تأیید نهایی نمایش داده می‌شود.", state);
-      return;
-    }
-    if (data === "author:help") {
-      await this.#send(this.#ownerId(state), this.#ownerCommandHelp(), state, { reply_markup: this.#authorHomeKeyboard() });
-      return;
-    }
-    if (data.startsWith("group:owner-toggle:") || data.startsWith("group:leave:") || data.startsWith("group:block:") || data.startsWith("group:restore:")) {
-      const [scope, action, groupId] = data.split(":");
-      const group = state.groups?.[groupId];
-      if (!group || !/^-?\d{1,20}$/.test(groupId || "")) {
-        await this.#send(this.#ownerId(state), "گروه موردنظر در فهرست موجود نیست.", state);
-        return;
-      }
-      if (action === "owner-toggle") {
-        state.groupSettings[groupId] ||= {};
-        state.groupSettings[groupId].botEnabled = state.groupSettings[groupId].botEnabled === false;
-        await this.#save(state);
-      } else if (action === "leave" || action === "block") {
-        const result = await this.#telegram(state, "leaveChat", { chat_id: groupId }, { bypassLocalRate: true });
-        if (result.ok) {
-          if (action === "block" && !state.blockedGroups.includes(groupId)) state.blockedGroups.push(groupId);
-          if (!state.leftGroups.includes(groupId)) state.leftGroups.push(groupId);
-          if (state.groups[groupId]) state.groups[groupId].botStatus = "left";
-          await this.#save(state);
-        } else {
-          await this.#send(this.#ownerId(state), "خروج انجام نشد؛ دسترسی یا وضعیت گروه را بررسی کنید.", state);
-        }
-      } else if (action === "restore") {
-        state.blockedGroups = state.blockedGroups.filter((id) => id !== groupId);
-        state.leftGroups = state.leftGroups.filter((id) => id !== groupId);
-        await this.#save(state);
-      }
-      const isOn = state.groupSettings?.[groupId]?.botEnabled !== false;
-      await this.#send(this.#ownerId(state), `وضعیت گروه ${group.title || groupId}: ${isOn ? "روشن" : "خاموش"}.`, state, { reply_markup: { inline_keyboard: [[button("↩️ جزئیات گروه", `group:view:${groupId}`, "primary")], [button("↩️ پنل مالک", "author:home", "secondary")]] } });
-      return;
-    }
-    if (data.startsWith("group:view:")) {
-      const groupId = data.slice("group:view:".length);
-      const group = state.groups?.[groupId];
-      if (!group) {
-        await this.#send(this.#ownerId(state), "این گروه دیگر در فهرست ذخیره‌شده وجود ندارد.", state);
-        return;
-      }
-      const usage = Number(state.groupUsage?.[groupId] || 0);
-      const isOn = state.groupSettings?.[groupId]?.botEnabled !== false;
-      const link = group.username ? `https://t.me/${group.username}` : (group.inviteLinkValid && group.inviteLink ? group.inviteLink : "لینک در دسترس نیست");
-      const rights = Object.entries(group.rights || {}).map(([key, value]) => `${key}: ${value === true ? "بله" : value === false ? "خیر" : "نامشخص"}`).join("\n");
-      const text = `👥 ${group.title || groupId}\nشناسه: ${groupId}\nنوع: ${group.type || "نامشخص"}\nلینک: ${link}\nوضعیت عضویت ربات: ${group.botStatus || "نامشخص"}\nتعداد اعضای گزارش‌شده: ${Number.isInteger(group.lastMemberCount) ? group.lastMemberCount : "نامشخص"}\nUpdateهای یکتای پردازش‌شده: ${usage}\nوضعیت قابلیت‌های گروه: ${isOn ? "روشن" : "خاموش"}\nمجوزها:\n${rights || "نامشخص"}`;
-      await this.#send(this.#ownerId(state), text, state, {
-        reply_markup: { inline_keyboard: [
-          [button(isOn ? "🔴 خاموش‌کردن گروه" : "🟢 روشن‌کردن گروه", `group:owner-toggle:${groupId}`, isOn ? "danger" : "success")],
-          [button("🚪 خروج ربات", `group:leave:${groupId}`, "danger"), button("⛔ مسدودسازی", `group:block:${groupId}`, "danger")],
-          [button("♻️ بازگردانی از مسدودها", `group:restore:${groupId}`, "success")],
-          [button("↩️ فهرست گروه‌ها", "author:groups:0", "primary")], [button("↩️ پنل مالک", "author:home", "secondary")],
-        ] },
-      });
-      return;
-    }
-    if (data === "broadcast:confirm") {
-      if (!state.broadcastDraft) {
-        await this.#send(this.#ownerId(state), "پیام آمادهٔ ارسال وجود ندارد.", state);
-        return;
-      }
-      const targets = Object.keys(state.groups || {}).filter((id) => {
-        const group = state.groups[id] || {};
-        return !state.blockedGroups.includes(id) && !state.leftGroups.includes(id)
-          && !["left", "kicked"].includes(String(group.botStatus || "").toLowerCase());
-      });
-      state.broadcastQueue = { ...state.broadcastDraft, chatIds: targets, index: 0, sent: 0, failed: 0, createdAt: Date.now() };
-      state.broadcastDraft = null;
-      state.flow = null;
-      await this.#save(state);
-      await this.#scheduleNext(state);
-      await this.#send(this.#ownerId(state), `📣 پیام همگانی در صف قرار گرفت. مقصدها: ${targets.length}. ارسال به‌صورت نوبتی و با رعایت محدودیت تلگرام انجام می‌شود.`, state);
-      return;
-    }
-    if (data === "broadcast:cancel") {
-      state.broadcastDraft = null;
-      state.flow = null;
-      await this.#save(state);
-      await this.#send(this.#ownerId(state), "ارسال همگانی لغو شد.", state, { reply_markup: this.#authorHomeKeyboard() });
-      return;
-    }
-
-    switch (data) {
-      case "db:install":
-        state.flow = "database_upload";
-        await this.#save(state);
-        await this.#loadFlowPrompt(state, "install.prompt", "فایل database.js را مستقیماً به‌صورت Document ارسال کن.");
-        break;
-      case "db:reload":
-        await this.#refreshDatabase(state);
-        break;
-      case "db:delete":
-        await this.#send(this.#ownerId(state), this.#text(state, "install.confirmDelete", "حذف دیتابیس؟ این کار تنظیمات جاری را پاک می‌کند."), state, {
-          reply_markup: { inline_keyboard: [[button("بله، حذف شود", "db:delete:yes", "danger"), button("لغو", "home", "primary")]] },
-        });
-        break;
-      case "db:delete:yes":
-        await this.#deleteDatabase(state);
-        break;
-      case "forward:new":
-        await this.#beginForward(state);
-        break;
-      case "channel:post":
-        await this.#send(this.#ownerId(state), "انتشار پست در کانال در این نسخه غیرفعال است.", state);
-        break;
-      case "forward:stop":
-        await this.#stopForward(state);
-        break;
-      case "help":
-        await this.#send(this.#ownerId(state), this.#ownerCommandHelp(), state, { reply_markup: this.#authorHomeKeyboard() });
-        break;
-      case "home":
-        await this.#showStart(state, this.#ownerId(state), true);
-        break;
-      default:
-        await this.#send(this.#ownerId(state), this.#text(state, "ui.unknown", "این گزینه شناخته نشد."), state);
-    }
-  }
-
-  #ownerCommandHelp() {
-    return [
-      "👑 راهنمای دستورات مالک",
-      "/author — پنل کامل مدیریت",
-      "/installDB — نصب دیتابیس با ارسال مستقیم database.js",
-      "/help groups — فهرست گروه‌ها و تعداد پیام‌های پردازش‌شده هر گروه",
-      "/help left <chat_id> — خروج دائمی از گروه",
-      "/help ban <chat_id> — مسدودسازی گروه و خروج",
-      "/help unban <chat_id> — برداشتن مسدودیت داخلی گروه",
-      "/help banlist — فهرست گروه‌های مسدود/ترک‌شده",
-      "/help invite <chat_id> — ساخت لینک دعوت در صورت داشتن مجوز",
-      "/help channel add <@username|id> — ثبت کانال",
-      "/help channel remove <id> — حذف کانال از فهرست ربات",
-      "/help channels — فهرست کانال‌ها",
-      "/help addadmin <user_id> [chat_id] — افزودن مدیر ربات",
-      "/help deladmin <user_id> [chat_id] — حذف مدیر ربات",
-      "/help broadcast — آماده‌سازی پیام همگانی",
-      "/help quota — آمار واقعی Cloudflare (در صورت تنظیم Analytics API) و سهمیه داخلی Updateها",
-      "/help webhook — اتصال مجدد Webhook (فقط مالک)",
-      "/help reports — مشاهده آخرین گزارش‌های تخلف",
-      "/help reportclear — پاک‌کردن صف گزارش‌ها",
-      "/help groupinfo <chat_id> — اطلاعات و مجوزهای یک گروه",
-    ].join("\n");
   }
 
   async #isTelegramAdmin(state, userId, chatId) {
     if (this.#isOwner(userId, state)) return true;
     const key = `${chatId}:${userId}`;
-    const cached = this.adminCache?.get(key);
+    const useCache = this.#cacheEnabled(state);
+    const cached = useCache ? this.adminCache?.get(key) : null;
     if (cached && cached.expiresAt > Date.now()) return cached.allowed;
     const result = await this.#telegram(state, "getChatMember", { chat_id: chatId, user_id: userId }, { bypassLocalRate: true });
     const allowed = Boolean(result.ok && ["creator", "administrator"].includes(result.result?.status));
     this.adminCache ||= new Map();
-    this.adminCache.set(key, { allowed, expiresAt: Date.now() + 30_000 });
-    if (this.adminCache.size > 1_000) {
+    if (useCache) this.adminCache.set(key, { allowed, expiresAt: Date.now() + 30_000 });
+    if (useCache && this.adminCache.size > 1_000) {
       for (const [cacheKey, entry] of this.adminCache) if (entry.expiresAt <= Date.now()) this.adminCache.delete(cacheKey);
       while (this.adminCache.size > 800) this.adminCache.delete(this.adminCache.keys().next().value);
     }
@@ -2183,7 +1864,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       reason: asText(details.reason || kind).slice(0, 180),
       count: Math.min(100_000, Number(details.count || 1)),
       userIds: [...new Set((details.userIds || []).map(String))].slice(0, 30),
-      action: asText(details.action || "بدون اقدام").slice(0, 100),
+      action: asText(details.action || "No action").slice(0, 100),
     };
     audit.reportedToOwner = shouldSend;
     state.securityAudit = [...(state.securityAudit || []), audit].slice(-500);
@@ -2196,15 +1877,9 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     if (shouldSend) {
       const owner = this.#ownerId(state);
       if (owner) {
-        const userIds = audit.userIds.length ? audit.userIds.join(", ") : "ثبت نشده";
+        const userIds = audit.userIds.length ? audit.userIds.join(", ") : "Not recorded";
         await this.#send(owner,
-          `🛡 گزارش امنیتی ${kind}
-گروه: ${audit.chatTitle} (${chatId})
-زمان: ${new Date(now).toLocaleString("fa-IR")}
-علت قابل‌اندازه‌گیری: ${audit.reason}
-تعداد رویدادها در بازه: ${state.securityAlerts[key].eventCount}
-کاربران مشکوک: ${userIds}
-اقدام واقعی: ${audit.action}`,
+          `🛡 SECURITY ALERT: ${kind}\nGroup: ${audit.chatTitle} (${chatId})\nTime: ${new Date(now).toLocaleString("en-US")}\nMeasured reason: ${audit.reason}\nEvents in window: ${state.securityAlerts[key].eventCount}\nSuspected users: ${userIds}\nAction taken: ${audit.action}`,
           state, {}, { bypassLocalRate: true });
       }
     }
@@ -2277,7 +1952,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     const record = {
       id, title: asText(chat.title || old.title || id).slice(0, 180), username,
       link: username ? `https://t.me/${username}` : null,
-      type: "channel", botStatus: botMember?.status || old.botStatus || "نامشخص",
+      type: "channel", botStatus: botMember?.status || old.botStatus || "Unknown",
       permissions, rightsCheckedAt: botMember ? Date.now() : Number(old.rightsCheckedAt || 0),
       lastSeenAt: Date.now(),
     };
@@ -2288,193 +1963,13 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     await this.#save(state);
   }
 
-  async #handleOwnerConsoleCommand(state, chat, args) {
-    const action = String(args[0] || "").toLowerCase();
-    const target = String(args[1] || "");
-    const numericChatId = /^-?\d{1,20}$/.test(target);
-    if (!action) {
-      await this.#showModulePage(state, 0);
-      return;
-    }
-    if (action === "groups") {
-      await this.#showGroupsPage(state, 0);
-      return;
-    }
-    if (action === "modules") {
-      await this.#showModulePage(state, 0);
-      return;
-    }
-    if (action === "banlist") {
-      const ids = [...new Set([...(state.blockedGroups || []), ...(state.leftGroups || [])])];
-      const lines = ids.map((id) => {
-        const group = state.groups?.[id];
-        const status = state.blockedGroups.includes(id) ? "مسدود" : "ترک‌شده دائمی";
-        return `• ${group?.title || "گروه ناشناخته"} | ${id} | ${status}`;
-      });
-      await this.#send(chat.id, `📋 فهرست گروه‌های مسدود یا ترک‌شده (${ids.length})\n\n${lines.join("\n") || "فهرست خالی است."}`, state);
-      return;
-    }
-    if (action === "reports") {
-      const records = (state.reportQueue || []).slice(-25).reverse();
-      const lines = records.map((item) => `• ${item.chatTitle} | ${item.chatId}\n  گزارش‌دهنده: ${item.reporterName} (${item.reporterId})\n  پیام: ${item.messageId} | ${item.text.slice(0, 180)}`);
-      await this.#send(chat.id, `🚩 آخرین گزارش‌ها (${records.length})\n\n${lines.join("\n\n") || "گزارشی ثبت نشده است."}`, state);
-      return;
-    }
-    if (action === "reportclear") {
-      const count = (state.reportQueue || []).length;
-      state.reportQueue = [];
-      await this.#save(state);
-      await this.#send(chat.id, `✅ صف گزارش‌ها پاک شد؛ ${count} مورد حذف شد.`, state);
-      return;
-    }
-    if (action === "webhook") {
-      const result = await this.#setWebhook(state);
-      await this.#send(chat.id, result.ok ? "✅ اتصال Webhook به تلگرام بازتنظیم شد." : `❌ بازتنظیم Webhook ناموفق بود: ${asText(result.reason || result.description || "خطای نامشخص")}`, state);
-      return;
-    }
-    if (["left", "ban", "unban", "invite", "groupinfo"].includes(action) && !numericChatId) {
-      await this.#send(chat.id, `شناسه عددی گروه معتبر نیست. نمونه: /help ${action} -1001234567890`, state);
-      return;
-    }
-    if (action === "left" || action === "ban") {
-      const group = state.groups?.[target];
-      if (action === "left" && !state.leftGroups.includes(target)) state.leftGroups.push(target);
-      if (action === "ban" && !state.blockedGroups.includes(target)) state.blockedGroups.push(target);
-      await this.#save(state);
-      const leave = await this.#telegram(state, "leaveChat", { chat_id: target }, { bypassLocalRate: true });
-      await this.#send(chat.id, `${action === "ban" ? "⛔ گروه در فهرست مسدودسازی داخلی ثبت شد" : "👋 خروج دائمی از گروه ثبت شد"}.\nگروه: ${group?.title || target}\nشناسه: ${target}\nنتیجه تلگرام: ${leave.ok ? "خروج انجام شد" : asText(leave.description || "عضویت قبلی/دسترسی قابل تأیید نیست")}`, state);
-      return;
-    }
-    if (action === "unban") {
-      state.blockedGroups = state.blockedGroups.filter((id) => id !== target);
-      state.leftGroups = state.leftGroups.filter((id) => id !== target);
-      await this.#save(state);
-      await this.#send(chat.id, `✅ محدودیت داخلی گروه ${target} برداشته شد. برای بازگشت، ربات را دوباره به گروه اضافه کن.`, state);
-      return;
-    }
-    if (action === "invite") {
-      const group = state.groups?.[target];
-      if (group?.username) {
-        await this.#send(chat.id, `🔗 ${group.title || target}\nhttps://t.me/${group.username}`, state);
-        return;
-      }
-      const result = await this.#telegram(state, "createChatInviteLink", { chat_id: target, name: "Bot owner invite" }, { bypassLocalRate: true });
-      if (!result.ok || !result.result?.invite_link) {
-        await this.#send(chat.id, `ساخت لینک ممکن نشد: ${asText(result.description || "ربات باید مجوز دعوت داشته باشد")}`, state);
-        return;
-      }
-      if (group) {
-        group.inviteLink = result.result.invite_link;
-        group.inviteLinkValid = true;
-        group.inviteLinkCreatedAt = Date.now();
-      }
-      await this.#save(state);
-      await this.#send(chat.id, `🔗 لینک دعوت گروه:\n${result.result.invite_link}`, state);
-      return;
-    }
-    if (action === "groupinfo") {
-      const group = state.groups?.[target];
-      if (!group) {
-        await this.#send(chat.id, "گروه در فهرست ثبت‌شده پیدا نشد.", state);
-        return;
-      }
-      const usage = Number(state.groupUsage?.[target] || 0);
-      await this.#send(chat.id, `👥 ${group.title}\nID: ${target}\nنوع: ${group.type}\nلینک: ${group.link || "ندارد"}\nوضعیت ربات: ${group.botStatus}\nپیام‌های پردازش‌شده در این گروه: ${usage}\nدسترسی‌ها: ${JSON.stringify(group.rights || {})}`, state);
-      return;
-    }
-    if (action === "channel" && String(args[1] || "").toLowerCase() === "add") {
-      const reference = String(args[2] || "");
-      if (!reference) {
-        await this.#send(chat.id, "نمونه: /help channel add @channelusername", state);
-        return;
-      }
-      const channel = await this.#telegram(state, "getChat", { chat_id: reference }, { bypassLocalRate: true });
-      if (!channel.ok || channel.result?.type !== "channel") {
-        await this.#send(chat.id, `کانال قابل دسترسی نیست: ${asText(channel.description || "شناسه نامعتبر")}`, state);
-        return;
-      }
-      const me = await this.#telegram(state, "getMe", {}, { bypassLocalRate: true });
-      const member = me.ok ? await this.#telegram(state, "getChatMember", { chat_id: channel.result.id, user_id: me.result.id }, { bypassLocalRate: true }) : { ok: false };
-      if (!member.ok || !["creator", "administrator", "member", "restricted", "left", "kicked"].includes(member.result?.status)) {
-        await this.#send(chat.id, "وضعیت عضویت ربات در کانال از تلگرام قابل تأیید نبود؛ کانال ثبت نشد.", state);
-        return;
-      }
-      await this.#trackChannel(state, channel.result, member.result);
-      const record = state.channels.find((item) => String(item.id) === String(channel.result.id));
-      await this.#send(chat.id, `✅ کانال ثبت شد: ${record.title}\nشناسه: ${record.id}`, state);
-      return;
-    }
-    if (action === "channel" && String(args[1] || "").toLowerCase() === "remove") {
-      const channelId = String(args[2] || "");
-      if (!/^-?\d{1,20}$/.test(channelId)) {
-        await this.#send(chat.id, "نمونه: /help channel remove -1001234567890", state);
-        return;
-      }
-      const before = state.channels.length;
-      state.channels = state.channels.filter((item) => String(item.id) !== channelId);
-      await this.#save(state);
-      await this.#send(chat.id, state.channels.length < before ? `✅ کانال ${channelId} از فهرست ربات حذف شد.` : `ℹ️ کانال ${channelId} در فهرست نبود.`, state);
-      return;
-    }
-    if (action === "channels") {
-      const lines = state.channels.map((item) => `• ${item.title} | ${item.id} | ${item.username ? `@${item.username}` : "خصوصی"}`);
-      await this.#send(chat.id, `📢 کانال‌های ثبت‌شده (${state.channels.length})\n\n${lines.join("\n") || "کانالی ثبت نشده است."}`, state);
-      return;
-    }
-    if (action === "addadmin" || action === "deladmin") {
-      const userId = String(args[1] || "");
-      const groupId = String(args[2] || "");
-      if (!/^\d{1,20}$/.test(userId)) {
-        await this.#send(chat.id, `شناسه کاربر معتبر نیست. نمونه: /help ${action} 123456789 [chat_id]`, state);
-        return;
-      }
-      if (groupId && !/^-?\d{1,20}$/.test(groupId)) {
-        await this.#send(chat.id, "شناسه گروه معتبر نیست.", state);
-        return;
-      }
-      const list = groupId ? (state.admins.byChat[groupId] ||= []) : state.admins.global;
-      if (action === "addadmin" && !list.includes(userId)) list.push(userId);
-      if (action === "deladmin") {
-        const index = list.indexOf(userId);
-        if (index >= 0) list.splice(index, 1);
-      }
-      await this.#save(state);
-      await this.#send(chat.id, `${action === "addadmin" ? "✅ مدیر اضافه شد" : "✅ مدیر حذف شد"}: ${userId}${groupId ? ` در گروه ${groupId}` : " (سراسری)"}. مدیران منصوب‌شدهٔ مالک می‌توانند فرمان بدهند؛ خود ربات همچنان باید مجوز تلگرام لازم را داشته باشد.`, state);
-      return;
-    }
-    if (action === "broadcast") {
-      state.flow = "broadcast_wait";
-      await this.#save(state);
-      await this.#send(chat.id, "پیام همگانی را به شکل متن یا رسانه بفرست. پس از پیش‌نمایش، ارسال باید با دکمه تأیید شود.", state);
-      return;
-    }
-    if (action === "quota") {
-      const day = utcDay();
-      if (state.quota.day !== day) state.quota = { day, publicRequests: 0, ownerRequests: 0, totalRequests: 0 };
-      await this.#save(state);
-      const native = await getCloudflareWorkersUsage({
-        accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
-        apiToken: this.env.CLOUDFLARE_API_TOKEN,
-        scriptName: this.env.CLOUDFLARE_SCRIPT_NAME || this.env.WORKER_NAME || "forwardfake",
-      });
-      const local = `\n\nسهمیه داخلی وبهوک همین ربات (شمارش دقیق Updateهای پذیرفته‌شده):\nعمومی: ${state.quota.publicRequests.toLocaleString("en-US")}/99,000\nمالک: ${state.quota.ownerRequests.toLocaleString("en-US")}/1,000\nمجموع: ${state.quota.totalRequests.toLocaleString("en-US")}/100,000\nبازنشانی داخلی: ${new Date(nextUtcMidnightMs()).toISOString()}`;
-      if (native.ok) {
-        await this.#send(chat.id, `☁️ آمار رسمی Cloudflare GraphQL (UTC امروز تا ${native.to})\nکل حساب: ${native.account.requests.toLocaleString("en-US")} درخواست | ${native.account.errors.toLocaleString("en-US")} خطا\nاین Worker (${this.env.CLOUDFLARE_SCRIPT_NAME || this.env.WORKER_NAME || "forwardfake"}): ${native.worker.requests.toLocaleString("en-US")} درخواست | ${native.worker.errors.toLocaleString("en-US")} خطا\nزیر‌درخواست‌های حساب: ${native.account.subrequests.toLocaleString("en-US")}\n\nاین داده از Analytics GraphQL کلودفلر خوانده شده؛ ممکن است با تأخیر آماری نمایش داده شود.${local}`, state);
-      } else {
-        await this.#send(chat.id, `⚠️ آمار رسمی Cloudflare در دسترس نیست (${native.reason}).\nبرای فعال‌سازی: Account ID را در CLOUDFLARE_ACCOUNT_ID قرار بده و API Token با مجوز Analytics:Read را در Secret با نام CLOUDFLARE_API_TOKEN ذخیره کن.\nتا آن زمان هیچ مصرف کلودفلری حدس زده نمی‌شود؛ فقط شمارندهٔ دقیق Updateهای همین ربات نشان داده می‌شود.${local}`, state);
-      }
-      return;
-    }
-    await this.#send(chat.id, this.#ownerCommandHelp(), state, { reply_markup: this.#authorHomeKeyboard() });
-  }
-
   #rememberPvUser(state, user, updateId = null) {
     if (!user?.id || user.is_bot) return;
     const id = String(user.id);
     const old = state.pvUsers[id] || {};
     state.pvUsers[id] = {
       id,
-      firstName: asText(user.first_name || old.firstName || "کاربر").slice(0, 100),
+      firstName: asText(user.first_name || old.firstName || "User").slice(0, 100),
       lastName: asText(user.last_name || old.lastName || "").slice(0, 100),
       username: user.username || old.username || null,
       lastSeenAt: Date.now(),
@@ -2495,220 +1990,44 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     const list = Array.isArray(state.knownMembers[chatId]) ? state.knownMembers[chatId] : [];
     const id = String(user.id);
     const existingIndex = list.findIndex((item) => String(item.id) === id);
-    const entry = { id, firstName: asText(user.first_name || "کاربر").slice(0, 80), lastName: asText(user.last_name || "").slice(0, 80), username: user.username || null, isBot: Boolean(user.is_bot), lastSeenAt: Date.now() };
+    const entry = { id, firstName: asText(user.first_name || "User").slice(0, 80), lastName: asText(user.last_name || "").slice(0, 80), username: user.username || null, isBot: Boolean(user.is_bot), lastSeenAt: Date.now() };
     if (existingIndex >= 0) list.splice(existingIndex, 1);
     list.push(entry);
     state.knownMembers[chatId] = list.slice(-max);
   }
 
-  async #privateJoinMarkup(state) {
-    const me = await this.#telegram(state, "getMe", {}, { bypassLocalRate: true });
-    const username = asText(me?.result?.username).replace(/^@/, "");
-    if (!me.ok || !/^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(username)) return {};
-    return { reply_markup: { inline_keyboard: [[{ text: this.#text(state, "addToGroup", "➕ افزودن ربات به گروه"), url: `https://t.me/${username}?startgroup=true` }]] } };
-  }
-
   async #handlePrivateMessage(state, message) {
     const user = message.from || {};
     const chat = message.chat || {};
-    const chatId = chat.id;
+    if (!isPrivate(chat) || !this.#isOwner(user.id, state)) return;
+
     const text = asText(message.text || message.caption);
-    const owner = this.#isOwner(user.id, state);
-    this.#rememberPvUser(state, user, message.update_id);
     const parsed = parseCommand(text);
-    const bootstrapStart = Boolean(parsed?.command === "/start" && !this.#ownerId(state));
-    if (!owner && !bootstrapStart) {
-      await this.#save(state);
-      const markup = await this.#privateJoinMarkup(state);
-      await this.#send(chatId, this.#text(state, "privateOnly", "🤖 این ربات در PV کاربران عادی فعالیت نمی‌کند؛ آن را به گروه یا سوپرگروه اضافه کنید."), state, markup);
-      return;
-    }
-
-    if (parsed) {
-      const { command, args } = parsed;
-      if (command === "/start") {
-        if (!state.security.ownerId) {
-          const candidateId = String(user.id ?? "");
-          if (!isTelegramId(candidateId) || Number(candidateId) <= 0 || user.is_bot || String(chatId) !== candidateId) {
-            await this.#send(chatId, "برای ثبت مالک، /start را با حساب شخصی در گفت‌وگوی خصوصی بفرست.", state);
-            return;
-          }
-          state.security.ownerId = candidateId;
-          state.security.ownerClaimedAt = Date.now();
-          state.security.ownerUsername = user.username || null;
-          state.security.ownerDisplayName = userDisplay(user).slice(0, 120);
-          await this.#save(state);
-          await this.#send(chatId,
-            `${this.#text(state, "ownerStartup", "مالک باید ابتدا از حساب شخصی خود در PV ربات /start بفرستد؛ اولین /start خصوصی مالک را ثبت می‌کند.")}\n\n👑 این حساب به‌عنوان اولین مالک ثبت شد.\nبرای نصب دیتابیس: /installDB\nپنل مدیریت: /author`,
-            state, { reply_markup: this.#authorHomeKeyboard() });
-          return;
-        }
-        await this.#showStart(state, chatId, owner);
-        return;
-      }
-
-      if (command === "/author") {
-        if (!owner) {
-          await this.#send(chatId, "⛔ پنل /author فقط برای مالک ربات در دسترس است.", state);
-          return;
-        }
-        await this.#send(chatId, "👑 پنل مدیریت مالک\nماژول‌ها، گروه‌ها، کانال‌ها، ارسال همگانی و تنظیمات ربات را از اینجا مدیریت کن.", state, {
-          reply_markup: this.#authorHomeKeyboard(),
-        });
-        return;
-      }
-
-      if (command === "/installdb") {
-        if (!owner) {
-          await this.#send(chatId, state.security.ownerId
-            ? "⛔ دستور /installDB فقط برای مالک ربات فعال است."
-            : "ابتدا مالک باید /start را در گفت‌وگوی خصوصی ارسال کند.", state);
-          return;
-        }
+    if (parsed?.command === "/settings") {
+      if (parsed.args.length === 1 && parsed.args[0].toLowerCase() === "install") {
         state.flow = "database_upload";
         await this.#save(state);
-        await this.#send(chatId, this.#text(state, "install.prompt", "📎 فایل database.js را مستقیماً به‌صورت Document آپلود کن؛ لینک لازم نیست و حجم حداکثر 256 KiB است."), state);
+        await this.#send(chat.id,
+          "DATABASE INSTALLATION\n\nUpload your database file as a Telegram document. Supported filenames: database.js or database.json. The file must contain data-only JSON (or `export default { ... }`).",
+          state,
+        );
         return;
       }
-
-      if (command === "/help") {
-        if (owner) await this.#handleOwnerConsoleCommand(state, chat, args);
-        else await this.#send(chatId, this.#text(state, "help", "برای راهنمای استفاده، پیام عادی بفرست یا در گروه از مدیر کمک بگیر."), state);
-        return;
-      }
-
-      if (command === "/cancel") {
-        if (!owner) return;
+      if (parsed.args.length === 0) {
         state.flow = null;
-        state.forwardDraft = null;
-        state.broadcastDraft = null;
         await this.#save(state);
-        await this.#send(chatId, "عملیات جاری لغو شد.", state, { reply_markup: this.#authorHomeKeyboard() });
-        return;
+        await this.#sendSettingsPanel(state, chat.id);
       }
-
-      if (command === "/forget") {
-        const db = this.#db(state);
-        if (db?.features?.memory?.allowForgetCommand === false || !this.#featureEnabled(state, "memory")) {
-          await this.#send(chatId, "حافظهٔ مکالمه در این ربات فعال نیست.", state);
-          return;
-        }
-        const memorySpec = state.resourceRegistry?.["chat-context"];
-        const encoded = encodeURIComponent(`${chatId}:${user.id}`.slice(0, 180));
-        if (memorySpec?.ring) {
-          const index = memorySpec.ring.indexOf(encoded);
-          if (index >= 0) memorySpec.ring.splice(index, 1);
-          memorySpec.entryCount = memorySpec.ring.length;
-          await this.ctx.storage.delete(`${this.#resourcePrefix("chat-context")}item:${encoded}`);
-          await this.#save(state);
-        }
-        for (const key of [...this.answerCache.keys()]) {
-          if (key.startsWith(`${chatId}:${user.id}:`)) this.answerCache.delete(key);
-        }
-        await this.#send(chatId, this.#text(state, "conversation.contextReset", "🧠 حافظهٔ این گفت‌وگو پاک شد."), state);
-        return;
-      }
-
-      if (command.startsWith("/")) {
-        const db = this.#db(state);
-        const rules = this.#featureEnabled(state, "customCommands") ? (db?.features?.customCommands?.rules || []) : [];
-        const rule = rules.find((item) => String(item.command || "").toLowerCase() === command && item.enabled !== false);
-        if (rule?.response) {
-          await this.#send(chatId, renderTemplate(String(rule.response), {
-            user: userDisplay(user), username: user.username || "", chat: "خصوصی",
-          }), state);
-        } else if (owner) {
-          await this.#send(chatId, this.#ownerCommandHelp(), state, { reply_markup: this.#authorHomeKeyboard() });
-        }
-        return;
-      }
+      return;
     }
 
-    if (owner && state.flow === "database_upload") {
-      if (!message.document) {
-        await this.#send(chatId, "منتظر فایل database.js هستم. فایل را با گزینهٔ ارسال به‌صورت Document بفرست؛ متن یا تصویر قابل نصب نیست.", state);
-        return;
-      }
+    if (state.flow === "database_upload" && message.document) {
       await this.#installFromTelegramDocument(state, message);
-      return;
     }
-
-    if (owner && state.flow === "broadcast_wait") {
-      const hasMedia = Boolean(message.photo || message.video || message.document || message.animation || message.audio || message.voice || message.video_note);
-      if (!text && !hasMedia) {
-        await this.#send(chatId, "برای پیام همگانی، متن یا رسانه بفرست؛ برای لغو /cancel را بزن.", state);
-        return;
-      }
-      state.broadcastDraft = {
-        sourceChatId: chatId,
-        sourceMessageId: message.message_id,
-        text: text.slice(0, 3_800),
-        hasMedia,
-      };
-      state.flow = "broadcast_confirm";
-      await this.#save(state);
-      const targetCount = Object.keys(state.groups || {}).filter((id) => !state.blockedGroups.includes(id) && !state.leftGroups.includes(id)).length;
-      await this.#send(chatId, `📣 پیش‌نمایش پیام همگانی آماده است.\nگروه‌های مقصد: ${targetCount}\nارسال به‌صورت صفی انجام می‌شود و برای هر گروه نتیجه ثبت خواهد شد.`, state, {
-        reply_markup: { inline_keyboard: [[button("✅ تأیید ارسال", "broadcast:confirm", "success"), button("لغو", "broadcast:cancel", "danger")]] },
-      });
-      return;
-    }
-
-    if (owner && state.flow === "channel_post_text") {
-      state.flow = null;
-      await this.#save(state);
-      await this.#send(chatId, "انتشار مستقیم پیام در کانال در این نسخه پشتیبانی نمی‌شود.", state);
-      return;
-    }
-
-    if (owner && typeof state.flow === "string" && state.flow.startsWith("forward_")) {
-      await this.#forwardFlowText(state, text);
-      return;
-    }
-
-    if (owner && message.document) {
-      await this.#send(chatId, "برای نصب دیتابیس، ابتدا /installDB را بفرست و سپس database.js را به‌صورت Document آپلود کن.", state);
-      return;
-    }
-
-    const db = this.#db(state);
-    if (!db || !text) return;
-
-    const privateJokes = db.features?.jokes || {};
-    if (this.#featureEnabled(state, "jokes")
-      && matchPhrase(text, privateJokes.triggerWords || ["جوک", "لطیفه"])) {
-      await this.#reply(message, randomItem(privateJokes.items, this.#text(state, "jokes.empty", "فعلاً جوکی ندارم!")), state);
-      return;
-    }
-
-    if (!this.#featureEnabled(state, "chatbot")) return;
-    const normalized = normalizeText(text);
-    const contextKey = `${chatId}:${user.id}`;
-    const memoryEnabled = this.#featureEnabled(state, "memory");
-    const priorContext = memoryEnabled ? await this.#resourceGet(state, "chat-context", contextKey) : null;
-    const contextFingerprint = priorContext?.lastMessage ? normalizeText(priorContext.lastMessage).slice(0, 40) : "new";
-    const cacheKey = `${chatId}:${user.id}:${normalized.slice(0, 120)}|${contextFingerprint}`;
-    const cached = memoryEnabled ? this.#cacheGet(cacheKey) : "";
-    const cooldownMs = Math.max(0, Number(db.features?.chatbot?.cooldownSeconds || 0)) * 1_000;
-    const cooldownActive = Boolean(cooldownMs && priorContext?.lastReplyAt && Date.now() - Number(priorContext.lastReplyAt) < cooldownMs);
-    const answer = cooldownActive ? "" : (cached || this.#chatbotAnswer(text, db, priorContext));
-    if (!answer) return;
-
-    if (memoryEnabled) {
-      this.#cacheSet(cacheKey, answer, Number(db.runtime?.cache?.chatAnswerTtlSeconds || 600) * 1_000);
-      const history = Array.isArray(priorContext?.history) ? priorContext.history : [];
-      history.push({ prompt: text.slice(0, 500), answer: answer.slice(0, 500), at: Date.now() });
-      await this.#resourcePut(state, "chat-context", contextKey, {
-        userId: String(user.id), chatId: String(chatId), displayName: userDisplay(user), lastMessage: text.slice(0, 500),
-        history: history.slice(-Math.max(1, Number(db.features?.memory?.privateHistory || 12))),
-        lastReplyAt: Date.now(), updatedAt: Date.now(),
-      });
-    }
-    await this.#save(state);
-    await this.#reply(message, answer, state);
   }
 
-  #cacheGet(key) {
+  #cacheGet(key, state) {
+    if (!this.#cacheEnabled(state)) return "";
     const entry = this.answerCache.get(key);
     if (!entry) return "";
     if (entry.expiresAt <= Date.now()) {
@@ -2721,7 +2040,8 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     return entry.answer || "";
   }
 
-  #cacheSet(key, answer, ttlMs = 600_000) {
+  #cacheSet(key, answer, ttlMs = 600_000, state = null) {
+    if (!this.#cacheEnabled(state)) return;
     this.answerCache.delete(key);
     this.answerCache.set(key, { answer: String(answer).slice(0, 3800), expiresAt: Date.now() + ttlMs });
     while (this.answerCache.size > 512) this.answerCache.delete(this.answerCache.keys().next().value);
@@ -2743,8 +2063,8 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       lastMessage: memory?.lastMessage || "",
       previousMessage: memory?.history?.at(-1)?.prompt || "",
       previousAnswer: memory?.history?.at(-1)?.answer || "",
-      user: memory?.displayName || "رفیق",
-      time: new Date().toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tehran" }),
+      user: memory?.displayName || "friend",
+      time: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }),
     }).slice(0, 3_800);
   }
 
@@ -2762,7 +2082,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     if (!feature.autoApprove && !allowed) return;
     const result = await this.#telegram(state, "approveChatJoinRequest", { chat_id: chatId, user_id: userId }, { bypassLocalRate: true });
     if (result.ok && feature.notify && this.#ownerId(state)) {
-      await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "join.approved", "✅ درخواست عضویت {name} تأیید شد."), { name: userDisplay(request.from) }), state);
+      await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "join.approved", "✅ Join request approved for {name}."), { name: userDisplay(request.from) }), state);
     }
   }
 
@@ -2799,9 +2119,9 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       const severity = joins.length >= escalationThreshold ? 2 : 1;
       await this.#securityAlert(state, {
         chatId, chatTitle: message.chat.title || chatId, kind: "join_raid",
-        reason: `${joins.length} ورود در ${raidWindow} ثانیه؛ آستانه ${raidThreshold}`,
+        reason: `${joins.length} joins in ${raidWindow} seconds; threshold ${raidThreshold}`,
         count: members.length, userIds: members.map((member) => member.id), severity,
-        action: "حالت کپچای ورود برای اعضای تازه فعال شد؛ اقدام محدودسازی منوط به مجوز واقعی ربات است.",
+        action: "Join CAPTCHA was enabled for new members; restrictions require verified bot permissions.",
       });
     }
     const captchaRequired = this.#featureEnabled(state, "captcha", chatId)
@@ -2815,8 +2135,8 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
         if (canRestrict !== true) {
           await this.#securityAlert(state, {
             chatId, chatTitle: message.chat.title || chatId, kind: "captcha_permission_missing",
-            reason: "عضو تازه نیازمند بررسی بود، اما دسترسی محدودسازی ربات تأیید نشد.", count: 1,
-            userIds: [member.id], action: "اقدام انجام نشد؛ مجوز restrict_members تأیید نشد.",
+            reason: "A new member required review, but the bot restriction permission could not be verified.", count: 1,
+            userIds: [member.id], action: "No action taken; restrict_members permission was not verified.",
           });
         } else {
         const restrict = await this.#telegram(state, "restrictChatMember", {
@@ -2834,23 +2154,23 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
         if (restrict.ok) {
           const nonce = Math.random().toString(36).slice(2, 10);
           state.pendingVerifications[key] = { userId: String(member.id), chatId, nonce, expiresAt: now + clampNumber(captchaFeature.timeoutSeconds, 120, 30, 900) * 1_000 };
-          await this.#send(message.chat.id, `${userDisplay(member)}، برای فعال‌شدن امکان ارسال پیام، دکمهٔ تأیید را بزن.`, state, {
-            reply_markup: { inline_keyboard: [[button("✅ من ربات نیستم", `captcha:${chatId}:${member.id}:${nonce}`, "success")]] },
+          await this.#send(message.chat.id, `${userDisplay(member)}, press the confirmation button to enable messaging.`, state, {
+            reply_markup: { inline_keyboard: [[button("✅ I am not a bot", `captcha:${chatId}:${member.id}:${nonce}`, "success")]] },
           }, { group: true });
         } else {
           await this.#securityAlert(state, {
             chatId, chatTitle: message.chat.title || chatId, kind: "captcha_action_failed",
-            reason: "درخواست محدودسازی عضو تازه توسط تلگرام پذیرفته نشد.", count: 1,
-            userIds: [member.id], action: `محدودسازی ناموفق؛ ${asText(restrict.description || "خطای تلگرام").slice(0, 90)}`,
+            reason: "Telegram rejected the new-member restriction request.", count: 1,
+            userIds: [member.id], action: `Restriction failed; ${asText(restrict.description || "Telegram error").slice(0, 90)}`,
           });
         }
         }
       }
       if (this.#featureEnabled(state, "welcome", chatId)) {
-        const text = asText(welcomeFeature.text || this.#text(state, "welcome", "سلام {name}، خوش اومدی!"));
+        const text = asText(welcomeFeature.text || this.#text(state, "welcome", "Welcome, {name}!"));
         await this.#send(message.chat.id, renderTemplate(text, {
           name: userDisplay(member), username: member.username ? `@${member.username}` : "",
-          id: member.id, chat: message.chat.title || "گروه",
+          id: member.id, chat: message.chat.title || "Group",
         }), state, {}, { group: true });
       }
     }
@@ -2879,16 +2199,16 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       reporterId: String(reporter.id || ""), reporterName: userDisplay(reporter).slice(0, 80),
       targetId: target?.id ? String(target.id) : null, targetName: target ? userDisplay(target).slice(0, 80) : null,
       messageId: message.reply_to_message?.message_id || message.message_id,
-      text: asText(reportText || message.reply_to_message?.text || message.reply_to_message?.caption || "بدون متن").slice(0, 600),
+      text: asText(reportText || message.reply_to_message?.text || message.reply_to_message?.caption || "No text").slice(0, 600),
       createdAt: Date.now(),
     };
     state.reportQueue.push(record);
     state.reportQueue = state.reportQueue.slice(-100);
     await this.#save(state);
     if (this.#ownerId(state)) {
-      await this.#send(this.#ownerId(state), `🚩 گزارش جدید\nگروه: ${record.chatTitle}\nشناسه گروه: ${record.chatId}\nگزارش‌دهنده: ${record.reporterName} (${record.reporterId})\nهدف: ${record.targetName || "تعیین نشده"}\nشناسه پیام: ${record.messageId}\nمتن: ${record.text}`, state);
+      await this.#send(this.#ownerId(state), `🚩 NEW REPORT\nGroup: ${record.chatTitle}\nGroup ID: ${record.chatId}\nReporter: ${record.reporterName} (${record.reporterId})\nTarget: ${record.targetName || "Not specified"}\nMessage ID: ${record.messageId}\nText: ${record.text}`, state);
     }
-    await this.#reply(message, "✅ گزارش برای مدیران ارسال شد. ممنون از اطلاع‌رسانی.", state);
+    await this.#reply(message, "✅ The report has been sent to the group administrators. Thank you.", state);
     return true;
   }
 
@@ -2949,12 +2269,12 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     const linkFlood = anti.signals?.linkFlood !== false && linkCount >= clampNumber(anti.maxLinksPerMessage, 4, 1, 20);
     const mentionFlood = anti.signals?.mentionFlood !== false && mentionCount >= clampNumber(anti.maxMentionsPerMessage, 8, 2, 50);
     const commandFlood = anti.signals?.commandFlood !== false && record.commands.length >= clampNumber(anti.maxCommandsPerWindow, 5, 2, 30);
-    const reason = userRate ? `ارسال ${record.times.length} پیام توسط کاربر ${userId} در ${anti.windowSeconds || 10} ثانیه`
-      : duplicate ? `تکرار یک محتوای یکسان ${duplicateCount} بار توسط کاربر ${userId}`
-        : chatFlood ? `موج پیام: ${activity.length} پیام در ${anti.chatWindowSeconds || 5} ثانیه`
-          : linkFlood ? `تعداد لینک در یک پیام: ${linkCount}`
-            : mentionFlood ? `تعداد اشاره در یک پیام: ${mentionCount}`
-              : commandFlood ? `ارسال ${record.commands.length} فرمان در بازه ${anti.commandWindowSeconds || 10} ثانیه` : "";
+    const reason = userRate ? `Sent ${record.times.length} messages by user ${userId} in ${anti.windowSeconds || 10} seconds`
+      : duplicate ? `Repeated identical content ${duplicateCount} times by user ${userId}`
+        : chatFlood ? `Message flood: ${activity.length} messages in ${anti.chatWindowSeconds || 5} seconds`
+          : linkFlood ? `Links in one message: ${linkCount}`
+            : mentionFlood ? `Mentions in one message: ${mentionCount}`
+              : commandFlood ? `Sent ${record.commands.length} commands in ${anti.commandWindowSeconds || 10} seconds` : "";
 
     state.spam[`${chatId}:${userId}`] = record;
     const keys = Object.keys(state.spam);
@@ -2970,14 +2290,14 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     if (!reason) return false;
 
     record.strikes = Math.min(100, Number(record.strikes || 0) + 1);
-    let action = "بدون اقدام";
+    let action = "No action";
     const wantsDelete = anti.deleteFloodMessages !== false;
     const canDelete = wantsDelete ? await this.#botPermission(state, chatId, "can_delete_messages") : false;
     if (wantsDelete && canDelete === true) {
       const deleted = await this.#telegram(state, "deleteMessage", { chat_id: chatId, message_id: message.message_id }, { bypassLocalRate: true });
-      action = deleted.ok ? "پیام حذف شد" : "حذف پیام ناموفق بود؛ تلگرام درخواست را نپذیرفت";
+      action = deleted.ok ? "Message deleted" : "Message deletion failed; Telegram rejected the request";
     } else if (wantsDelete) {
-      action = "پیام حذف نشد؛ مجوز حذف پیام تأیید نشد";
+      action = "Message was not deleted; delete permission was not verified";
     }
 
     let muted = false;
@@ -2997,9 +2317,9 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
           until_date: untilDate, use_independent_chat_permissions: true,
         }, { bypassLocalRate: true });
         muted = result.ok;
-        action += muted ? `؛ محدودیت ${minutes} دقیقه‌ای اعمال شد` : "؛ محدودسازی توسط تلگرام رد شد";
+        action += muted ? `; restriction of ${minutes} minutes applied` : "; Telegram rejected the restriction";
       } else {
-        action += "؛ محدودسازی انجام نشد چون مجوز restrict_members تأیید نشد";
+        action += "; no restriction applied because restrict_members permission was not verified";
       }
     }
 
@@ -3015,7 +2335,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     record.commands = [];
     await this.#save(state);
     if (muted) {
-      await this.#send(chatId, renderTemplate(this.#text(state, "moderation.muted", "🛡 به دلیل رفتار اسپم، {name} برای {minutes} دقیقه محدود شد."), {
+      await this.#send(chatId, renderTemplate(this.#text(state, "moderation.muted", "🛡 {name} was restricted for {minutes} minutes due to spam behavior."), {
         name: userDisplay(message.from), minutes: clampNumber(anti.muteMinutes, 10, 1, 1_440),
       }), state, {}, { group: true });
     }
@@ -3043,16 +2363,16 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     const chatId = message.chat.id;
     const protectedIds = [...(db.roles?.protectedIds || []), ...(db.features?.moderation?.protectedIds || [])].map(String);
     if (!target.id || target.is_bot || this.#isOwner(target.id, state) || protectedIds.includes(String(target.id))) {
-      await this.#reply(message, this.#text(state, "moderation.protected", "🛡 این کاربر در فهرست محافظت‌شده است."), state);
+      await this.#reply(message, this.#text(state, "moderation.protected", "🛡 This user is on the protected list."), state);
       return true;
     }
     const targetMember = await this.#telegram(state, "getChatMember", { chat_id: chatId, user_id: target.id }, { bypassLocalRate: true });
     if (!targetMember.ok || !targetMember.result?.status) {
-      await this.#reply(message, this.#text(state, "moderation.memberCheckFailed", "⚠️ وضعیت عضو قابل تأیید نیست؛ عملیات انجام نشد."), state);
+      await this.#reply(message, this.#text(state, "moderation.memberCheckFailed", "⚠️ The member status could not be verified; no action was taken."), state);
       return true;
     }
     if (["creator", "administrator"].includes(targetMember.result.status)) {
-      await this.#reply(message, this.#text(state, "moderation.protected", "🛡 مدیران گروه محافظت می‌شوند."), state);
+      await this.#reply(message, this.#text(state, "moderation.protected", "🛡 Group administrators are protected."), state);
       return true;
     }
 
@@ -3064,15 +2384,15 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     const needsDelete = action === "delete";
     const needsPin = action === "pin";
     if (needsRestrict && !(botStatus.status === "creator" || (botStatus.status === "administrator" && botStatus.can_restrict_members === true))) {
-      await this.#reply(message, "⛔ ربات مجوز Restrict Members ندارد؛ مجوز مدیریت اعضا را به آن بده.", state);
+      await this.#reply(message, "⛔ The bot lacks Restrict Members permission. Grant it member-management access.", state);
       return true;
     }
     if (needsDelete && !(botStatus.status === "creator" || (botStatus.status === "administrator" && botStatus.can_delete_messages === true))) {
-      await this.#reply(message, "⛔ ربات مجوز Delete Messages ندارد.", state);
+      await this.#reply(message, "⛔ The bot lacks Delete Messages permission.", state);
       return true;
     }
     if (needsPin && !(botStatus.status === "creator" || (botStatus.status === "administrator" && botStatus.can_pin_messages === true))) {
-      await this.#reply(message, "⛔ ربات مجوز Pin Messages ندارد.", state);
+      await this.#reply(message, "⛔ The bot lacks Pin Messages permission.", state);
       return true;
     }
 
@@ -3113,7 +2433,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       state.warnings[warningKey] = count;
       result = { ok: true };
       const threshold = clampNumber(db.features?.moderation?.warningThreshold, 3, 2, 10);
-      const warnText = renderTemplate(this.#text(state, "moderation.warn", "⚠️ {name}، لطفاً قوانین گروه را رعایت کن. اخطار {count}/{threshold}"), {
+      const warnText = renderTemplate(this.#text(state, "moderation.warn", "⚠️ {name}, please follow the group rules. Warning {count}/{threshold}"), {
         name: userDisplay(target), count, threshold,
       });
       await this.#reply(message, warnText, state);
@@ -3132,8 +2452,8 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     await this.#save(state);
     if (action !== "warn") {
       const responseText = result.ok
-        ? renderTemplate(this.#text(state, "moderation.actionSuccess", "✅ عملیات {action} برای {name} انجام شد."), { action: selected.label || action, name: userDisplay(target) })
-        : renderTemplate(this.#text(state, "moderation.actionFailed", "❌ عملیات انجام نشد: {reason}"), { reason: asText(result.description || "خطای تلگرام").slice(0, 160) });
+        ? renderTemplate(this.#text(state, "moderation.actionSuccess", "✅ {action} was completed for {name}."), { action: selected.label || action, name: userDisplay(target) })
+        : renderTemplate(this.#text(state, "moderation.actionFailed", "❌ The action failed: {reason}"), { reason: asText(result.description || "Telegram error").slice(0, 160) });
       await this.#reply(message, responseText, state);
     }
     return true;
@@ -3153,9 +2473,9 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       if (action === "delete") {
         await this.#telegram(state, "deleteMessage", { chat_id: message.chat.id, message_id: message.message_id }, { bypassLocalRate: true });
       } else if (action === "warn") {
-        await this.#reply(message, renderTemplate(rule.response || "⚠️ لطفاً قوانین گروه را رعایت کن.", { user: userDisplay(message.from) }), state);
+        await this.#reply(message, renderTemplate(rule.response || "⚠️ Please follow the group rules.", { user: userDisplay(message.from) }), state);
       } else if (action === "reply" && rule.response) {
-        await this.#reply(message, renderTemplate(rule.response, { user: userDisplay(message.from), chat: message.chat.title || "گروه" }), state);
+        await this.#reply(message, renderTemplate(rule.response, { user: userDisplay(message.from), chat: message.chat.title || "Group" }), state);
       }
       await this.#save(state);
       return rule.stopProcessing !== false;
@@ -3176,9 +2496,9 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     const botReplyFeature = db.features?.botReplyJokes || {};
     if (this.#featureEnabled(state, "botReplyJokes", chat.id)
       && message.reply_to_message?.from?.is_bot && text && !text.startsWith("/")) {
-      const terms = botReplyFeature.terms || ["ریمو کن", "بن کن", "بنداز بیرون"];
+      const terms = botReplyFeature.terms || ["remove me", "ban me", "kick me out"];
       if (matchPhrase(text, terms)) {
-        await this.#reply(message, randomItem(botReplyFeature.responses, this.#text(state, "moderation.botMiss", "😂 منو نمی‌شه ریم کرد!")), state);
+        await this.#reply(message, randomItem(botReplyFeature.responses, this.#text(state, "moderation.botMiss", "😂 I cannot be removed!")), state);
         return;
       }
     }
@@ -3201,58 +2521,67 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
 
     if (message.new_chat_members?.length) await this.#handleNewMembers(state, message);
 
-    if (this.#featureEnabled(state, "reports", groupKey) && text && /^\/report(?:@\w+)?(?:\s|$)/i.test(text)) {
-      await this.#handleReport(state, message, text.replace(/^\/report(?:@\w+)?\s*/i, ""));
+    const command = parseCommand(text);
+    const reportCommand = configuredCommand(db.features?.reports?.command);
+    const botCommand = configuredCommand(db.features?.groupControls?.command);
+    const tagCommands = db.features?.tagKnownMembers?.commands || {};
+    const tagAllCommand = configuredCommand(tagCommands.tagAll);
+    const tagOptInCommand = configuredCommand(tagCommands.tagOptIn);
+    const tagOptOutCommand = configuredCommand(tagCommands.tagOptOut);
+
+    if (this.#featureEnabled(state, "reports", groupKey) && reportCommand && command?.command === reportCommand) {
+      await this.#handleReport(state, message, command.args.join(" "));
       return;
     }
     if (!trustedSender && await this.#recordSpam(state, message, db, operator)) return;
 
-    const command = parseCommand(text);
-    if (command?.command === "/bot" && this.#featureEnabled(state, "groupControls", groupKey)) {
+    if (botCommand && command?.command === botCommand && this.#featureEnabled(state, "groupControls", groupKey)) {
       const action = String(command.args?.[0] || "").toLowerCase();
       if (!operator) {
-        await this.#reply(message, this.#text(state, "group.adminOnly", "⛔ این فرمان فقط برای مدیر واقعی گروه مجاز است."), state);
+        await this.#reply(message, this.#text(state, "group.adminOnly", "⛔ Only a verified group administrator can use this command."), state);
         return;
       }
       if (!["on", "off"].includes(action)) {
-        await this.#reply(message, "برای کنترل پاسخ‌های ربات از /bot on یا /bot off استفاده کنید.", state);
+        await this.#reply(message, `Use ${botCommand} on or ${botCommand} off to control bot replies.`, state);
         return;
       }
       settings.botEnabled = action === "on";
       await this.#save(state);
-      await this.#reply(message, this.#text(state, action === "on" ? "group.botOn" : "group.botOff", action === "on" ? "✅ ربات روشن شد." : "🔕 پاسخ‌های عادی ربات خاموش شد."), state);
-      await this.#send(chat.id, "کنترل سریع:", state, { reply_markup: { inline_keyboard: [[button("🟢 روشن", `g5:on:${groupKey}`, "success"), button("🔴 خاموش", `g5:off:${groupKey}`, "danger")]] } }, { bypassLocalRate: true, group: true });
+      await this.#reply(message, this.#text(state, action === "on" ? "group.botOn" : "group.botOff", action === "on" ? "Bot replies are now enabled." : "Bot replies are now disabled."), state);
+      await this.#send(chat.id, "Quick controls:", state, { reply_markup: { inline_keyboard: [[button("🟢 ON", `g5:on:${groupKey}`, "success"), button("🔴 OFF", `g5:off:${groupKey}`, "danger")]] } }, { bypassLocalRate: true, group: true });
       return;
     }
-    if (["/tagoptout", "/tagoptin"].includes(command?.command)) {
-      state.tagOptOut[`${groupKey}:${user.id}`] = command.command === "/tagoptout";
+    if ((tagOptOutCommand && command?.command === tagOptOutCommand)
+      || (tagOptInCommand && command?.command === tagOptInCommand)) {
+      const optingOut = command.command === tagOptOutCommand;
+      state.tagOptOut[`${groupKey}:${user.id}`] = optingOut;
       await this.#save(state);
-      await this.#reply(message, this.#text(state, command.command === "/tagoptout" ? "group.tagOptOut" : "group.tagOptIn", "تنظیم تگ شما ذخیره شد."), state);
+      await this.#reply(message, this.#text(state, optingOut ? "group.tagOptOut" : "group.tagOptIn", "Your tag preference has been saved."), state);
       return;
     }
-    if (command?.command === "/tagall" && this.#featureEnabled(state, "tagKnownMembers", groupKey)) {
+    if (tagAllCommand && command?.command === tagAllCommand && this.#featureEnabled(state, "tagKnownMembers", groupKey)) {
       if (!operator) {
-        await this.#reply(message, this.#text(state, "group.adminOnly", "⛔ فقط مدیر واقعی گروه می‌تواند تگ انجام دهد."), state);
+        await this.#reply(message, this.#text(state, "group.adminOnly", "Only a real group administrator can start tagging."), state);
         return;
       }
       const cooldown = clampNumber(db.features?.tagKnownMembers?.cooldownSeconds, 300, 30, 86_400) * 1_000;
       if (Date.now() - Number(state.tagCooldowns[groupKey] || 0) < cooldown) {
-        await this.#reply(message, this.#text(state, "group.tagCooldown", "⏳ برای تگ‌کردن دوباره باید صبر کنید."), state);
+        await this.#reply(message, this.#text(state, "group.tagCooldown", "Please wait before starting another tag operation."), state);
         return;
       }
       const max = clampNumber(db.features?.tagKnownMembers?.maxMembers, 80, 1, 200);
       const ids = (state.knownMembers[groupKey] || []).filter((member) => !member.isBot && !state.tagOptOut[`${groupKey}:${member.id}`]).slice(-max).map((member) => String(member.id));
       if (!ids.length) {
-        await this.#reply(message, this.#text(state, "group.tagEmpty", "هنوز کاربر شناخته‌شده‌ای ثبت نشده است."), state);
+        await this.#reply(message, this.#text(state, "group.tagEmpty", "No known members are available to tag yet."), state);
         return;
       }
       const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
       state.tagDrafts[nonce] = { chatId: groupKey, initiatorId: String(user.id), ids, createdAt: Date.now(), expiresAt: Date.now() + 120_000 };
       state.tagDrafts = Object.fromEntries(Object.entries(state.tagDrafts).slice(-100));
       await this.#save(state);
-      await this.#reply(message, renderTemplate(this.#text(state, "group.tagPreview", "پیش‌نمایش تگ اعضای شناخته‌شده: {count}"), { count: ids.length }), state);
-      await this.#send(chat.id, "این فهرست فقط کاربران شناخته‌شده از Updateهای واقعی را دربرمی‌گیرد؛ کاربران ناشناخته قابل استخراج نیستند.", state, {
-        reply_markup: { inline_keyboard: [[button("✅ تأیید و ارسال", `t5:confirm:${groupKey}:${nonce}`, "success"), button("لغو", `t5:cancel:${groupKey}:${nonce}`, "danger")]] },
+      await this.#reply(message, renderTemplate(this.#text(state, "group.tagPreview", "Preview: {count} known members."), { count: ids.length }), state);
+      await this.#send(chat.id, "This preview includes only members observed in real Telegram updates. The Bot API cannot enumerate unknown group members.", state, {
+        reply_markup: { inline_keyboard: [[button("Confirm and Send", `t5:confirm:${groupKey}:${nonce}`, "success"), button("Cancel", `t5:cancel:${groupKey}:${nonce}`, "danger")]] },
       }, { bypassLocalRate: true, group: true });
       return;
     }
@@ -3265,10 +2594,10 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
         const canDelete = await this.#botPermission(state, groupKey, "can_delete_messages");
         if (canDelete === true) {
           const deleted = await this.#telegram(state, "deleteMessage", { chat_id: chat.id, message_id: message.message_id }, { bypassLocalRate: true });
-          if (deleted.ok) await this.#send(chat.id, this.#text(state, "moderation.blockedWord", "⛔ پیام حذف شد؛ این محتوا با قوانین گروه سازگار نبود."), state, {}, { group: true });
-          else await this.#securityAlert(state, { chatId: groupKey, chatTitle: chat.title, kind: "moderation_delete_failed", reason: "پیام دارای عبارت مسدود بود، اما حذف آن توسط تلگرام رد شد.", count: 1, userIds: [user.id], action: "حذف پیام ناموفق؛ تلگرام درخواست را رد کرد." });
+          if (deleted.ok) await this.#send(chat.id, this.#text(state, "moderation.blockedWord", "⛔ The message was deleted because it violated the group rules."), state, {}, { group: true });
+          else await this.#securityAlert(state, { chatId: groupKey, chatTitle: chat.title, kind: "moderation_delete_failed", reason: "The message contained a blocked phrase, but Telegram rejected the deletion.", count: 1, userIds: [user.id], action: "Message deletion failed; Telegram rejected the request." });
         } else {
-          await this.#securityAlert(state, { chatId: groupKey, chatTitle: chat.title, kind: "moderation_permission_missing", reason: "پیام دارای عبارت مسدود بود، اما مجوز حذف پیام ربات تأیید نشد.", count: 1, userIds: [user.id], action: "هیچ پیامی حذف نشد؛ مجوز حذف نامشخص یا غیرفعال بود." });
+          await this.#securityAlert(state, { chatId: groupKey, chatTitle: chat.title, kind: "moderation_permission_missing", reason: "The message contained a blocked phrase, but bot delete permission was not verified.", count: 1, userIds: [user.id], action: "No message was deleted; delete permission was missing or unverified." });
         }
         return;
       }
@@ -3289,13 +2618,13 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
         if (canDelete === true) {
           const deleted = await this.#telegram(state, "deleteMessage", { chat_id: chat.id, message_id: message.message_id }, { bypassLocalRate: true });
           if (deleted.ok) {
-            const notice = suspicious ? (phishing.notice || "⚠️ پیام مشکوک حذف شد؛ روی لینک‌های ناشناس کلیک نکن.") : (linkGuard.notice || "⛔ لینک طبق قوانین گروه حذف شد.");
+            const notice = suspicious ? (phishing.notice || "⚠️ A suspicious message was deleted. Do not click unknown links.") : (linkGuard.notice || "⛔ The link was deleted under the group rules.");
             await this.#send(chat.id, notice, state, {}, { group: true });
           } else {
-            await this.#securityAlert(state, { chatId: groupKey, chatTitle: chat.title, kind: "guard_delete_failed", reason: suspicious ? "الگوی مشکوک فیشینگ تشخیص داده شد." : "لینک با سیاست گروه ناسازگار تشخیص داده شد.", count: 1, userIds: [user.id], action: "حذف پیام توسط تلگرام رد شد؛ پیام حذف‌شده تلقی نمی‌شود." });
+            await this.#securityAlert(state, { chatId: groupKey, chatTitle: chat.title, kind: "guard_delete_failed", reason: suspicious ? "A suspicious phishing pattern was detected." : "The link violated the group policy.", count: 1, userIds: [user.id], action: "Telegram rejected the message deletion; the message is not considered deleted." });
           }
         } else {
-          await this.#securityAlert(state, { chatId: groupKey, chatTitle: chat.title, kind: "guard_permission_missing", reason: suspicious ? "الگوی مشکوک فیشینگ شناسایی شد." : "لینک ناسازگار با سیاست گروه شناسایی شد.", count: 1, userIds: [user.id], action: "اقدام حذف انجام نشد؛ مجوز واقعی حذف تأیید نشد." });
+          await this.#securityAlert(state, { chatId: groupKey, chatTitle: chat.title, kind: "guard_permission_missing", reason: suspicious ? "A suspicious phishing pattern was detected." : "The link violated the group policy.", count: 1, userIds: [user.id], action: "No deletion action was taken because delete permission was not verified." });
         }
         return;
       }
@@ -3316,7 +2645,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
           state.groupModuleOverrides[groupKey] ||= {};
           state.groupModuleOverrides[groupKey][featureId] = desired;
           await this.#save(state);
-          await this.#reply(message, `✅ ماژول ${getFeatureModule(featureId).title} در همین گروه ${desired ? "روشن" : "خاموش"} شد.`, state);
+          await this.#reply(message, `✅ Module ${getFeatureModule(featureId).title} was turned ${desired ? "ON" : "OFF"} in this group.`, state);
           await this.#scheduleNext(state);
           return;
         }
@@ -3331,14 +2660,14 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       const custom = db.features?.customCommands?.rules || [];
       const rule = custom.find((item) => String(item.command || "").toLowerCase() === parsed?.command && item.enabled !== false);
       if (rule?.response) {
-        await this.#reply(message, renderTemplate(rule.response, { user: userDisplay(user), username: user.username || "", chat: chat.title || "گروه" }), state);
+        await this.#reply(message, renderTemplate(rule.response, { user: userDisplay(user), username: user.username || "", chat: chat.title || "Group" }), state);
         return;
       }
     }
 
     if (settings.jokesEnabled !== false && this.#featureEnabled(state, "jokes", groupKey)
-      && text && matchPhrase(text, db.features.jokes.triggerWords || ["جوک", "یه جوک بگو"])) {
-      await this.#reply(message, randomItem(db.features.jokes.items, this.#text(state, "jokes.empty", "فعلاً جوکی ندارم!")), state);
+      && text && matchPhrase(text, db.features.jokes.triggerWords || ["joke", "tell me a joke"])) {
+      await this.#reply(message, randomItem(db.features.jokes.items, this.#text(state, "jokes.empty", "I do not have a joke right now.")), state);
       return;
     }
 
@@ -3346,9 +2675,9 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       const contextKey = `group:${chat.id}:${user.id}`;
       const memory = this.#featureEnabled(state, "memory", groupKey) ? await this.#resourceGet(state, "chat-context", contextKey) : null;
       const cacheKey = `g:${chat.id}:${user.id}:${normalizeText(text).slice(0, 120)}:${normalizeText(memory?.lastMessage || "new").slice(0, 40)}`;
-      const answer = this.#cacheGet(cacheKey) || this.#chatbotAnswer(text, db, memory);
+      const answer = this.#cacheGet(cacheKey, state) || this.#chatbotAnswer(text, db, memory);
       if (answer) {
-        this.#cacheSet(cacheKey, answer, Number(db.runtime?.cache?.chatAnswerTtlSeconds || 600) * 1000);
+        this.#cacheSet(cacheKey, answer, Number(db.runtime?.cache?.chatAnswerTtlSeconds || 600) * 1000, state);
         const history = Array.isArray(memory?.history) ? memory.history : [];
         history.push({ prompt: text.slice(0, 300), answer: answer.slice(0, 300), at: Date.now() });
         if (this.#featureEnabled(state, "memory", groupKey)) await this.#resourcePut(state, "chat-context", contextKey, {
@@ -3365,9 +2694,9 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     await this.#scheduleNext(state);
   }
 
-  async #setWebhook(state) {
+  async #setWebhook(state, requestedOrigin = "") {
     const token = botTokenFrom(this.env);
-    const origin = String(this.env.WORKER_PUBLIC_ORIGIN || "").trim();
+    const origin = String(requestedOrigin || this.env.WORKER_PUBLIC_ORIGIN || "").trim();
     let base;
     try { base = new URL(origin); } catch { return { ok: false, reason: "WORKER_PUBLIC_ORIGIN_INVALID" }; }
     if (base.protocol !== "https:" || !base.hostname.endsWith(".workers.dev")) return { ok: false, reason: "WORKER_PUBLIC_ORIGIN_MUST_BE_CANONICAL_HTTPS_WORKERS_DEV" };
@@ -3396,10 +2725,11 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
     }
   }
 
-  async setupWebhookOnce() {
+  async setupWebhookOnce(publicOrigin = "") {
     return this.#exclusive(async () => {
       const state = await this.#load();
-      const configuredOrigin = String(this.env.WORKER_PUBLIC_ORIGIN || "").trim();
+      await this.#syncCommandMenu(state);
+      const configuredOrigin = String(publicOrigin || this.env.WORKER_PUBLIC_ORIGIN || "").trim();
       let canonicalWebhook = "";
       try {
         const parsedOrigin = new URL(configuredOrigin);
@@ -3410,9 +2740,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
         }
       } catch { /* an invalid origin is reported by #setWebhook */ }
       if (state.webhookUrl && state.webhookUrl === canonicalWebhook) return { ok: true, already: true, url: state.webhookUrl };
-      // One-time bootstrap is required before Telegram can deliver the first private /start.
-      if (state.security.ownerId) return { ok: false, reason: "OWNER_MUST_RECONNECT_FROM_PRIVATE_PANEL" };
-      return this.#setWebhook(state);
+      return this.#setWebhook(state, configuredOrigin);
     });
   }
 
@@ -3509,7 +2837,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
   async #flushPendingState() {
     const pending = this.pendingState;
     if (!pending) return;
-    await this.ctx.storage.put("state", pending);
+    await this.ctx.storage.put("state", this.#persistableState(pending));
     if (this.pendingState === pending) this.pendingState = null;
   }
 
@@ -3532,22 +2860,27 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
   async #processUpdateInner(update) {
     const state = await this.#load();
     const updateId = update?.update_id;
-    const actorId = getTelegramUpdateActor(update);
-    const bootstrapCandidate = isOwnerBootstrapUpdate(update);
-    const reservation = this.#reserveWebhookRequest(state, actorId, bootstrapCandidate);
-    await this.#save(state);
-    if (!reservation.allowed) return;
-
     const callback = update?.callback_query;
+    const messageForGate = update?.message || update?.edited_message;
+    const commandForGate = parseCommand(messageForGate?.text || "");
+    const isOwnerSettingsMessage = Boolean(messageForGate && isPrivate(messageForGate.chat)
+      && this.#isOwner(messageForGate.from?.id, state)
+      && (commandForGate?.command === "/settings" || (state.flow === "database_upload" && messageForGate.document)));
+    const isOwnerSettingsCallback = Boolean(callback && this.#isOwner(callback.from?.id, state)
+      && isPrivate(callback.message?.chat) && String(callback.data || "").startsWith("settings:"));
+    if (state.settings?.botEnabled === false && !isOwnerSettingsMessage && !isOwnerSettingsCallback) return;
+    await this.#save(state);
+
     if (callback) {
       const callbackData = asText(callback.data);
-      if (callbackData.startsWith("captcha:") || callbackData.startsWith("group:bot:") || callbackData.startsWith("tag:")
+      if (this.#isOwner(callback.from?.id, state) && isPrivate(callback.message?.chat) && callbackData.startsWith("settings:")) {
+        await this.#answerCallback(callback.id);
+        await this.#handleSettingsCallback(state, callback);
+      } else if (callbackData.startsWith("captcha:") || callbackData.startsWith("group:bot:") || callbackData.startsWith("tag:")
         || callbackData.startsWith("g5:") || callbackData.startsWith("t5:")) {
         await this.#handleCallback(state, callback);
-      } else if (this.#isOwner(callback.from?.id, state) && isPrivate(callback.message?.chat)) {
-        await this.#handleCallback(state, callback);
       } else {
-        await this.#answerCallback(callback.id, this.#text(state, "access.denied", "این گزینه برای شما فعال نیست."));
+        await this.#answerCallback(callback.id);
       }
     } else if (update?.my_chat_member) {
       const botStatus = update.my_chat_member;
@@ -3555,7 +2888,6 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       const member = botStatus.new_chat_member || {};
       if (chat.type === "channel") {
         await this.#trackChannel(state, chat, member);
-        if (this.#ownerId(state)) await this.#send(this.#ownerId(state), `📢 رویداد عضویت ربات در کانال ثبت شد: ${asText(chat.title || chat.id)} (${chat.id})؛ وضعیت: ${asText(member.status || "نامشخص")} .`, state, {}, { bypassLocalRate: true });
         return;
       }
       if (!isGroup(chat)) return;
@@ -3569,7 +2901,6 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
           state.groupSettings[String(chat.id)].chatterNextAt = 0;
         }
         await this.#save(state);
-        if (this.#ownerId(state)) await this.#send(this.#ownerId(state), `⚠️ ربات از «${asText(chat.title || chat.id)}» حذف شد یا دسترسی‌اش لغو شد.`, state, {}, { bypassLocalRate: true });
       } else if (["member", "administrator"].includes(nextStatus)) {
         const groupId = String(chat.id);
         // A group previously rejected only for being below the minimum size may
@@ -3590,7 +2921,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
               state.botJoinState[groupId].active = false;
               state.botJoinState[groupId].countCheckedAt = Date.now();
               await this.#save(state);
-              if (this.#ownerId(state)) await this.#send(this.#ownerId(state), `⚠️ شمارش اعضای گروه ${asText(chat.title || chat.id)} (${groupId}) از تلگرام دریافت نشد؛ ربات گروه را ترک نکرد.`, state, {}, { bypassLocalRate: true });
+              // Joining a group must remain silent; no greeting or owner notification is sent.
             } else {
               state.groups[groupId].lastMemberCount = countResult.result;
               state.groups[groupId].lastMemberCountAt = Date.now();
@@ -3599,8 +2930,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
               if (countResult.result < 25) {
                 state.botJoinState[groupId].status = "rejected_too_small";
                 await this.#save(state);
-                await this.#send(chat.id, renderTemplate(this.#text(state, "group.minimumMembers", "⚠️ گروه باید حداقل ۲۵ عضو داشته باشد؛ تعداد گزارش‌شده توسط تلگرام: {members}."), { members: countResult.result }), state, {}, { bypassLocalRate: true, group: true });
-                const left = await this.#telegram(state, "leaveChat", { chat_id: chat.id }, { bypassLocalRate: true });
+                  const left = await this.#telegram(state, "leaveChat", { chat_id: chat.id }, { bypassLocalRate: true });
                 if (left.ok) {
                   state.groups[groupId].botStatus = "left";
                   state.leftGroups = [...new Set([...state.leftGroups, groupId])].slice(-2_000);
@@ -3609,14 +2939,9 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
                   state.botJoinState[groupId].active = false;
                   state.botJoinState[groupId].status = "leave_failed_minimum_members";
                 }
-                if (this.#ownerId(state)) await this.#send(this.#ownerId(state), `⚠️ گروه «${asText(chat.title || chat.id)}» به‌دلیل کمتر بودن تعداد اعضای گزارش‌شده از ۲۵، ${left.ok ? "ترک شد" : "قابل ترک نبود"}. تعداد گزارش‌شده: ${countResult.result}.`, state, {}, { bypassLocalRate: true });
               } else {
                 state.botJoinState[groupId].status = "ready";
                 await this.#save(state);
-                await this.#send(chat.id, renderTemplate(this.#text(state, "group.ready", "✅ ربات با موفقیت به گروه اضافه شد و آمادهٔ کار است. تعداد اعضای گزارش‌شده توسط تلگرام: {members} (این عدد تفکیک انسان و ربات نیست)."), { members: countResult.result }), state, {
-                  reply_markup: { inline_keyboard: [[{ text: "عضو شدن", style: "success", url: "https://t.me/MUNITOS" }]] },
-                }, { bypassLocalRate: true, group: true });
-                if (this.#ownerId(state)) await this.#send(this.#ownerId(state), `✅ ربات در گروه «${asText(chat.title || chat.id)}» فعال شد؛ تعداد اعضای گزارش‌شده توسط تلگرام: ${countResult.result}.`, state, {}, { bypassLocalRate: true });
               }
             }
           }
@@ -3648,16 +2973,16 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
           if (this.#featureEnabled(state, "raidProtection", chat.id) && leaves.length >= threshold) {
             await this.#securityAlert(state, {
               chatId: String(chat.id), chatTitle: chat.title || String(chat.id), kind: "leave_burst",
-              reason: `${leaves.length} خروج یا حذف عضو در ${windowSeconds} ثانیه؛ آستانه ${threshold}`,
+              reason: `${leaves.length} member departures or removals in ${windowSeconds} seconds; threshold ${threshold}`,
               count: leaves.length, userIds: leaves.map((item) => item.userId).filter(Boolean).slice(-30),
               severity: leaves.length >= clampNumber(anti.raid?.escalationLeaves, 20, threshold, 200) ? 2 : 1,
-              action: "رویدادها ثبت شدند؛ اقدام خودکار انجام نشد.",
+              action: "Events were recorded; no automatic action was taken.",
             });
           }
         }
         if (this.#featureEnabled(state, "goodbye", chat.id)) {
           const goodbye = this.#db(state)?.features?.goodbye || {};
-          await this.#send(chat.id, renderTemplate(goodbye.text || "👋 {name} از گروه خارج شد.", { name: userDisplay(newMember.user) }), state, {}, { group: true });
+          await this.#send(chat.id, renderTemplate(goodbye.text || "👋 {name} left the group.", { name: userDisplay(newMember.user) }), state, {}, { group: true });
         }
       } else if (["member", "restricted"].includes(newMember.status) && ["left", "kicked"].includes(oldStatus)) {
         await this.#handleNewMembers(state, { chat, new_chat_members: [newMember.user].filter(Boolean) });
@@ -3747,7 +3072,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       task.stoppedAt = now;
       task.stopReason = "channel_publishing_disabled_in_v4_2";
       await this.#save(state);
-      if (this.#ownerId(state)) await this.#send(this.#ownerId(state), "⚠️ زمان‌بندی قدیمی که مقصد آن کانال بود متوقف شد؛ انتشار مستقیم در کانال در نسخهٔ جدید غیرفعال است. جزئیات زمان‌بندی در state حفظ شده است.", state, {}, { bypassLocalRate: true });
+      if (this.#ownerId(state)) await this.#send(this.#ownerId(state), "⚠️ A legacy schedule targeting a channel was stopped because direct channel publishing is disabled in this version. Schedule details remain in state.", state, {}, { bypassLocalRate: true });
       return;
     }
     const result = await this.#telegram(state, "forwardMessage", {
@@ -3770,7 +3095,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
           task.active = false;
           task.completedAt = now;
           await this.#save(state);
-          await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "forward.completed", "✅ فوروارد تکمیل شد. تعداد موفق: {sent}"), { sent: task.sent }), state);
+          await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "forward.completed", "✅ Forwarding completed. Successful: {sent}"), { sent: task.sent }), state);
           return;
         }
       }
@@ -3791,8 +3116,8 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       task.active = false;
       task.stoppedAt = now;
       await this.#save(state);
-      await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "forward.failed", "❌ زمان‌بندی متوقف شد. کد: {code}؛ توضیح: {reason}"), {
-        code: code || "نامشخص", reason: asText(result.description || "خطای تلگرام").slice(0, 160),
+      await this.#send(this.#ownerId(state), renderTemplate(this.#text(state, "forward.failed", "❌ The schedule stopped. Code: {code}; reason: {reason}"), {
+        code: code || "Unknown", reason: asText(result.description || "Telegram error").slice(0, 160),
       }), state);
       return;
     }
@@ -3880,7 +3205,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       const failed = Number(queue.failed || 0);
       state.broadcastQueue = null;
       await this.#save(state);
-      if (this.#ownerId(state)) await this.#send(this.#ownerId(state), `✅ ارسال همگانی تمام شد.\nارسال موفق: ${sent}\nناموفق: ${failed}`, state, { reply_markup: this.#authorHomeKeyboard() }, { bypassLocalRate: true });
+      if (this.#ownerId(state)) await this.#send(this.#ownerId(state), `BROADCAST COMPLETED\nSent: ${sent}\nFailed: ${failed}`, state, {}, { bypassLocalRate: true });
       return;
     }
     const chatId = ids[index];
@@ -3925,6 +3250,7 @@ ${settings.join("\n") || "تنظیم اضافه‌ای ثبت نشده است."}
       console.error("Durable update queue batch failed", asText(error?.message || error).slice(0, 120));
     }
     state = await this.#load();
+    if (state.settings?.botEnabled === false) return;
     try {
       await this.#completeResourceCleanup(state, 256);
     } catch (error) {
