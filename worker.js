@@ -4,7 +4,7 @@ import { DurableObject } from "cloudflare:workers";
 const EMBEDDED_BOT_TOKEN = "9100041417:AAHYOpFKKTGpBQpdHoTAExwZYzlXPqOtSjg";
 const EMBEDDED_OWNER_TELEGRAM_ID = "8621035125";
 const DO_NAME = "forward-scheduler-owner";
-const BUILD_VERSION = "5.4.0";
+const BUILD_VERSION = "5.4.1";
 const WEBHOOK_URL = "https://forwardfake.killerdutchmobin.workers.dev/telegram/webhook";
 const WEBHOOK_SECRET = "fwd_scheduler_8621035125_5_4_0_telegram_edge";
 const WEBHOOK_MAX_CONNECTIONS = 10;
@@ -3570,18 +3570,55 @@ async function ensureTelegramIntegration(force = false) {
 }
 
 async function runScheduledBootstrap(env, reason = "cron") {
-  const stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
-  const claim = await stub.claimIntegrationCheck(Date.now(), WEBHOOK_CHECK_INTERVAL_MS, BUILD_VERSION);
-  if (!claim?.run) return { skipped: true, reason: claim?.reason || "interval" };
+  const startedAt = Date.now();
+  let stub = null;
+  console.log(JSON.stringify({ event: "telegram_integration_bootstrap_started", reason, version: BUILD_VERSION }));
   try {
+    stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
+    const claim = await stub.claimIntegrationCheck(startedAt, WEBHOOK_CHECK_INTERVAL_MS, BUILD_VERSION);
+    if (!claim?.run) {
+      console.log(JSON.stringify({ event: "telegram_integration_bootstrap_skipped", reason, skipReason: claim?.reason || "interval" }));
+      return { skipped: true, reason: claim?.reason || "interval" };
+    }
     const result = await ensureTelegramIntegration(Boolean(claim.force));
     await stub.finishIntegrationCheck({ ...result, checkedAt: Date.now(), version: BUILD_VERSION });
     console.log(JSON.stringify({ event: "telegram_integration_ready", reason, ...result }));
     return result;
   } catch (error) {
     const message = String(error?.message || error).replaceAll(EMBEDDED_BOT_TOKEN, "[redacted]").slice(0, 220);
-    await stub.finishIntegrationCheck({ ok: false, checkedAt: Date.now(), version: BUILD_VERSION, error: message });
+    if (stub) {
+      try {
+        await stub.finishIntegrationCheck({ ok: false, checkedAt: Date.now(), version: BUILD_VERSION, error: message });
+      } catch (storageError) {
+        console.error(JSON.stringify({ event: "telegram_integration_error_state_write_failed", reason, error: String(storageError?.message || storageError).slice(0, 160) }));
+      }
+    }
     console.error(JSON.stringify({ event: "telegram_integration_failed", reason, error: message }));
+    return { ok: false, error: message };
+  }
+}
+
+async function repairTelegramIntegrationFromHealth(env) {
+  const reason = "healthz_self_heal";
+  const startedAt = Date.now();
+  let stub = null;
+  console.log(JSON.stringify({ event: "telegram_healthcheck_bootstrap_started", reason }));
+  try {
+    stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
+    const result = await ensureTelegramIntegration(true);
+    await stub.finishIntegrationCheck({ ...result, checkedAt: Date.now(), version: BUILD_VERSION });
+    console.log(JSON.stringify({ event: "telegram_healthcheck_bootstrap_ready", durationMs: Date.now() - startedAt, ...result }));
+    return { ok: true, ...result };
+  } catch (error) {
+    const message = String(error?.message || error).replaceAll(EMBEDDED_BOT_TOKEN, "[redacted]").slice(0, 220);
+    if (stub) {
+      try {
+        await stub.finishIntegrationCheck({ ok: false, checkedAt: Date.now(), version: BUILD_VERSION, error: message });
+      } catch (storageError) {
+        console.error(JSON.stringify({ event: "telegram_healthcheck_error_state_write_failed", error: String(storageError?.message || storageError).slice(0, 160) }));
+      }
+    }
+    console.error(JSON.stringify({ event: "telegram_healthcheck_bootstrap_failed", durationMs: Date.now() - startedAt, error: message }));
     return { ok: false, error: message };
   }
 }
@@ -3602,6 +3639,16 @@ export default {
     const requestId = request.headers.get("cf-ray") || crypto.randomUUID();
 
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/healthz")) {
+      // Health checks are also a recovery path: if Cron has not fired yet, an
+      // operator opening /healthz can still register and verify the webhook.
+      const beforeRepair = await telegramControlApi("getWebhookInfo").catch((error) => ({
+        url: "",
+        _error: String(error?.message || error).replaceAll(EMBEDDED_BOT_TOKEN, "[redacted]").slice(0, 180),
+      }));
+      let bootstrap = null;
+      if (beforeRepair?.url !== WEBHOOK_URL) {
+        bootstrap = await repairTelegramIntegrationFromHealth(env);
+      }
       const stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
       const [telegram, webhook, scheduler] = await Promise.all([
         telegramControlApi("getMe").then((result) => ({
@@ -3621,7 +3668,7 @@ export default {
         })).catch((error) => ({ ok: false, error: String(error?.message || error).slice(0, 180) })),
         stub.getDiagnostics().catch((error) => ({ ok: false, error: String(error?.message || error).slice(0, 180) })),
       ]);
-      const ok = Boolean(telegram.ok && webhook.ok && scheduler.ok && webhook.matchesExpectedUrl);
+      const ok = Boolean(telegram.ok && webhook.ok && scheduler.ok && webhook.matchesExpectedUrl && (!bootstrap || bootstrap.ok));
       return jsonResponse({
         service: "Forward Scheduler",
         version: BUILD_VERSION,
@@ -3632,6 +3679,7 @@ export default {
         telegram,
         webhook,
         scheduler,
+        bootstrap,
         checkedAt: new Date().toISOString(),
       }, ok ? 200 : 503);
     }
@@ -3716,6 +3764,8 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(runScheduledBootstrap(env, `cron:${controller.cron || "unknown"}`));
+    const reason = `cron:${controller.cron || "unknown"}`;
+    console.log(JSON.stringify({ event: "cron_invocation_received", reason, scheduledTime: controller.scheduledTime || null }));
+    ctx.waitUntil(runScheduledBootstrap(env, reason));
   },
 };
