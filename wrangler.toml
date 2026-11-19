@@ -1,6 +1,6 @@
-name = "forward-scheduler-owner"
+name = "forwardfake"
 main = "worker.js"
-compatibility_date = "2026-11-20"
+compatibility_date = "2026-11-19"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
