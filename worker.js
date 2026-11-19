@@ -4,6 +4,11 @@ import { DurableObject } from "cloudflare:workers";
 const EMBEDDED_BOT_TOKEN = "9100041417:AAHYOpFKKTGpBQpdHoTAExwZYzlXPqOtSjg";
 const EMBEDDED_OWNER_TELEGRAM_ID = "8621035125";
 const DO_NAME = "forward-scheduler-owner";
+const BUILD_VERSION = "5.4.0";
+const WEBHOOK_URL = "https://forwardfake.killerdutchmobin.workers.dev/telegram/webhook";
+const WEBHOOK_SECRET = "fwd_scheduler_8621035125_5_4_0_telegram_edge";
+const WEBHOOK_MAX_CONNECTIONS = 10;
+const WEBHOOK_CHECK_INTERVAL_MS = 5 * 60_000;
 
 const DAY_MS = 86_400_000;
 const MAX_DATABASE_BYTES = 20 * 1024 * 1024;
@@ -1252,17 +1257,28 @@ class ForwardSchedulerRuntime {
   }
 
   async #syncCommandMenu(state, ownerChatId = "") {
-    await this.#telegram(state, "deleteMyCommands", {}, { bypassLocalRate: true });
-    for (const scope of ["all_private_chats", "all_group_chats", "all_chat_administrators"]) {
-      await this.#telegram(state, "deleteMyCommands", { scope: { type: scope } }, { bypassLocalRate: true });
-    }
     const ownerId = String(ownerChatId || this.#ownerId(state) || "");
-    if (!ownerId || !/^\d{1,20}$/.test(ownerId)) return;
-    await this.#telegram(state, "deleteMyCommands", { scope: { type: "chat", chat_id: Number(ownerId) } }, { bypassLocalRate: true });
-    await this.#telegram(state, "setMyCommands", {
+    if (!ownerId || !/^\d{1,20}$/.test(ownerId)) {
+      console.error(JSON.stringify({ event: "telegram_command_menu_owner_missing" }));
+      return false;
+    }
+    const results = [];
+    results.push(await this.#telegram(state, "deleteMyCommands", {}, { bypassLocalRate: true }));
+    for (const scope of ["all_private_chats", "all_group_chats", "all_chat_administrators"]) {
+      results.push(await this.#telegram(state, "deleteMyCommands", { scope: { type: scope } }, { bypassLocalRate: true }));
+    }
+    results.push(await this.#telegram(state, "deleteMyCommands", { scope: { type: "chat", chat_id: Number(ownerId) } }, { bypassLocalRate: true }));
+    results.push(await this.#telegram(state, "setMyCommands", {
       scope: { type: "chat", chat_id: Number(ownerId) },
-      commands: [{ command: "settings", description: "Open settings or use /settings install" }],
-    }, { bypassLocalRate: true });
+      commands: [{ command: "settings", description: "Open owner settings" }],
+    }, { bypassLocalRate: true }));
+    const failures = results.filter((item) => !item?.ok);
+    if (failures.length) {
+      console.error(JSON.stringify({ event: "telegram_command_menu_sync_failed", failures: failures.map((item) => ({ errorCode: item.error_code || 0, description: String(item.description || "UNKNOWN").slice(0, 120) })) }));
+      return false;
+    }
+    console.log(JSON.stringify({ event: "telegram_command_menu_synced", ownerChatId: ownerId, commands: ["settings"] }));
+    return true;
   }
 
   async #sendSettingsPanel(state, chatId) {
@@ -1271,7 +1287,11 @@ class ForwardSchedulerRuntime {
     if (result?.ok && result.result?.message_id) {
       state.settingsMessage = { chatId: String(chatId), messageId: result.result.message_id };
       await this.#save(state);
+      console.log(JSON.stringify({ event: "owner_settings_panel_sent", chatId: String(chatId), messageId: result.result.message_id }));
+    } else {
+      console.error(JSON.stringify({ event: "owner_settings_panel_send_failed", chatId: String(chatId), errorCode: Number(result?.error_code || 0), description: String(result?.description || "UNKNOWN").slice(0, 160) }));
     }
+    return result;
   }
 
   async #editSettingsPanel(state, callback, note = "", force = false) {
@@ -2810,50 +2830,6 @@ class ForwardSchedulerRuntime {
     await this.#scheduleNext(state);
   }
 
-  async pollTelegram() {
-    return this.#exclusive(async () => {
-      const state = await this.#load();
-      const readyKey = "telegram:polling:ready";
-      if (!(await this.ctx.storage.get(readyKey))) {
-        const detached = await this.#telegram(state, "deleteWebhook", { drop_pending_updates: false }, { bypassLocalRate: true });
-        if (!detached?.ok) {
-          return { ok: false, reason: asText(detached?.description || "WEBHOOK_DETACH_FAILED").slice(0, 180) };
-        }
-        await this.#syncCommandMenu(state);
-        await this.ctx.storage.put(readyKey, { initializedAt: Date.now() });
-      }
-
-      const offsetKey = "telegram:polling:offset";
-      let offset = Number(await this.ctx.storage.get(offsetKey) || 0);
-      if (!Number.isSafeInteger(offset) || offset < 0) offset = 0;
-      const response = await this.#telegram(state, "getUpdates", {
-        ...(offset ? { offset } : {}),
-        limit: 100,
-        timeout: 45,
-        allowed_updates: TELEGRAM_UPDATE_TYPES,
-      }, { bypassLocalRate: true, retry429: false, timeoutMs: 55_000 });
-
-      if (!response?.ok || !Array.isArray(response.result)) {
-        return { ok: false, reason: asText(response?.description || "GET_UPDATES_FAILED").slice(0, 180) };
-      }
-
-      let queued = 0;
-      let duplicates = 0;
-      for (const update of response.result) {
-        if (!Number.isSafeInteger(update?.update_id) || update.update_id < 0) continue;
-        const accepted = await this.handleUpdate(update);
-        if (!accepted?.queued) {
-          return { ok: false, reason: accepted?.reason || "UPDATE_QUEUE_REJECTED", queued, duplicates };
-        }
-        offset = Math.max(offset, update.update_id + 1);
-        await this.ctx.storage.put(offsetKey, offset);
-        if (accepted.duplicate) duplicates += 1;
-        else queued += 1;
-      }
-      return { ok: true, received: response.result.length, queued, duplicates, nextOffset: offset };
-    });
-  }
-
   #updatePartition(update) {
     const chat = update?.message?.chat || update?.edited_message?.chat
       || update?.business_message?.chat || update?.edited_business_message?.chat || update?.guest_message?.chat
@@ -2875,14 +2851,26 @@ class ForwardSchedulerRuntime {
       if ((meta.seenIds || []).includes(updateId)) return { queued: true, duplicate: true };
       if (Number(meta.pendingCount || 0) >= 512) return { queued: false, reason: "QUEUE_FULL" };
       const partition = this.#updatePartition(update);
-      await txn.put(key, { updateId, partition, update, createdAt: Date.now(), attempts: 0 });
+      const updateType = getTelegramUpdateType(update);
+      await txn.put(key, { updateId, partition, update, updateType, createdAt: Date.now(), attempts: 0 });
       meta.pendingCount = Math.max(0, Number(meta.pendingCount || 0)) + 1;
       meta.seenIds = [...(meta.seenIds || []), updateId].slice(-4_096);
+      meta.lastReceivedAt = Date.now();
+      meta.lastReceivedUpdateId = updateId;
+      meta.lastReceivedType = updateType;
       meta.updatedAt = Date.now();
       await txn.put("queue:v1:meta", meta);
-      return { queued: true, duplicate: false };
+      return { queued: true, duplicate: false, pendingCount: meta.pendingCount, updateType };
     });
     await storage.setAlarm(Date.now() + 50);
+    console.log(JSON.stringify({
+      event: "durable_update_queued",
+      updateId,
+      updateType: getTelegramUpdateType(update),
+      queued: Boolean(result.queued),
+      duplicate: Boolean(result.duplicate),
+      pendingCount: Number(result.pendingCount || 0),
+    }));
     return result;
   }
 
@@ -2939,6 +2927,8 @@ class ForwardSchedulerRuntime {
         const meta = await txn.get("queue:v1:meta") || { pendingCount: 0, seenIds: [] };
         meta.pendingCount = Math.max(0, Number(meta.pendingCount || 0) - 1);
         meta.lastProcessedAt = Date.now();
+        meta.lastProcessedUpdateId = row.item.updateId;
+        meta.lastProcessedType = row.item.updateType || getTelegramUpdateType(row.item.update);
         await txn.put("queue:v1:meta", meta);
       });
     }
@@ -2959,9 +2949,14 @@ class ForwardSchedulerRuntime {
     const updateId = update?.update_id;
     const hasUpdateId = Number.isSafeInteger(updateId) && updateId >= 0;
     const initial = await this.#load();
+    const updateType = getTelegramUpdateType(update);
     // Commit completion before acknowledging the queue item. A retry after a
     // crash between the state write and queue deletion will then be idempotent.
-    if (hasUpdateId && (initial.updateIds || []).includes(updateId)) return;
+    if (hasUpdateId && (initial.updateIds || []).includes(updateId)) {
+      console.log(JSON.stringify({ event: "durable_update_duplicate_skipped", updateId, updateType }));
+      return;
+    }
+    console.log(JSON.stringify({ event: "durable_update_processing", updateId, updateType }));
     await this.#processUpdateInner(update);
     if (hasUpdateId) {
       const completed = await this.#load();
@@ -2969,6 +2964,7 @@ class ForwardSchedulerRuntime {
       await this.#save(completed);
     }
     await this.#flushPendingState();
+    console.log(JSON.stringify({ event: "durable_update_processed", updateId, updateType }));
   }
 
   async #processUpdateInner(update) {
@@ -2983,7 +2979,21 @@ class ForwardSchedulerRuntime {
       && (commandForGate?.command === "/settings" || (state.flow === "database_upload" && messageForGate.document)));
     const isOwnerSettingsCallback = Boolean(callback && this.#isOwner(callback.from?.id, state)
       && isPrivate(callback.message?.chat) && String(callback.data || "").startsWith("settings:"));
-    if (state.settings?.botEnabled === false && !isOwnerSettingsMessage && !isOwnerSettingsCallback) return;
+    const actorId = messageForGate?.from?.id ?? callback?.from?.id ?? null;
+    console.log(JSON.stringify({
+      event: "telegram_update_dispatch",
+      updateId: Number.isSafeInteger(updateId) ? updateId : null,
+      updateType: getTelegramUpdateType(update),
+      actorIsOwner: this.#isOwner(actorId, state),
+      privateChat: Boolean(messageForGate ? isPrivate(messageForGate.chat) : callback ? isPrivate(callback.message?.chat) : false),
+      ownerSettingsMessage: isOwnerSettingsMessage,
+      ownerSettingsCallback: isOwnerSettingsCallback,
+      botEnabled: state.settings?.botEnabled !== false,
+    }));
+    if (state.settings?.botEnabled === false && !isOwnerSettingsMessage && !isOwnerSettingsCallback) {
+      console.log(JSON.stringify({ event: "telegram_update_ignored_bot_disabled", updateId }));
+      return;
+    }
     await this.#save(state);
 
     if (callback) {
@@ -3353,20 +3363,26 @@ class ForwardSchedulerRuntime {
     await this.ctx.storage.setAlarm(queue.nextAt);
   }
 
-  async alarm() {
-    return this.#exclusive(() => this.#alarmInner());
+  async alarm(alarmInfo = {}) {
+    return this.#exclusive(() => this.#alarmInner(alarmInfo));
   }
 
-  async #alarmInner() {
+  async #alarmInner(alarmInfo = {}) {
     let state = await this.#load();
     const now = Date.now();
+    console.log(JSON.stringify({ event: "durable_alarm_started", retryCount: Number(alarmInfo?.retryCount || 0), isRetry: Boolean(alarmInfo?.isRetry) }));
     try {
-      await this.#drainUpdateQueue(clampNumber(this.#db(state)?.limits?.queueBatchSize, 8, 1, 16));
+      const drained = await this.#drainUpdateQueue(clampNumber(this.#db(state)?.limits?.queueBatchSize, 8, 1, 16));
+      console.log(JSON.stringify({ event: "durable_alarm_queue_drained", processed: Number(drained || 0) }));
     } catch (error) {
-      console.error("Durable update queue batch failed", asText(error?.message || error).slice(0, 120));
+      console.error(JSON.stringify({ event: "durable_update_queue_batch_failed", error: asText(error?.message || error).slice(0, 180) }));
     }
     state = await this.#load();
-    if (state.settings?.botEnabled === false) return;
+    if (state.settings?.botEnabled === false) {
+      await this.#scheduleNext(state);
+      console.log(JSON.stringify({ event: "durable_alarm_bot_disabled_queue_maintenance_only" }));
+      return;
+    }
     try {
       await this.#completeResourceCleanup(state, 256);
     } catch (error) {
@@ -3395,8 +3411,179 @@ export class ForwardScheduler extends DurableObject {
   }
 
   handleUpdate(update) { return this.runtime.handleUpdate(update); }
-  pollTelegram() { return this.runtime.pollTelegram(); }
   alarm(alarmInfo) { return this.runtime.alarm(alarmInfo); }
+
+  async claimIntegrationCheck(now, intervalMs, version) {
+    return this.ctx.storage.transaction(async (txn) => {
+      const storedVersion = await txn.get("integration:version");
+      const lastSuccessAt = Number(await txn.get("integration:lastSuccessAt") || 0);
+      const lastAttemptAt = Number(await txn.get("integration:lastAttemptAt") || 0);
+      const force = storedVersion !== version;
+      if (!force && lastSuccessAt && now - lastSuccessAt < intervalMs) return { run: false, reason: "check_interval" };
+      if (lastAttemptAt && now - lastAttemptAt < 55_000) return { run: false, reason: "attempt_cooldown" };
+      await txn.put("integration:lastAttemptAt", now);
+      return { run: true, force };
+    });
+  }
+
+  async finishIntegrationCheck(result) {
+    await this.ctx.storage.transaction(async (txn) => {
+      await txn.put("integration:lastResult", {
+        ok: Boolean(result?.ok),
+        checkedAt: Number(result?.checkedAt || Date.now()),
+        version: String(result?.version || BUILD_VERSION),
+        botUsername: result?.botUsername || null,
+        webhookUrl: result?.webhookUrl || null,
+        pendingUpdates: Number(result?.pendingUpdates || 0),
+        lastWebhookError: result?.lastWebhookError || null,
+        error: result?.error || null,
+      });
+      if (result?.ok) {
+        await txn.put("integration:version", String(result.version || BUILD_VERSION));
+        await txn.put("integration:lastSuccessAt", Number(result.checkedAt || Date.now()));
+      } else {
+        // Retry on the next cron tick after an integration failure.
+        await txn.put("integration:lastAttemptAt", Date.now() - 55_000);
+      }
+    });
+  }
+
+  async getDiagnostics() {
+    const [queue, integration, state, manifest, alarmAt] = await Promise.all([
+      this.ctx.storage.get("queue:v1:meta"),
+      this.ctx.storage.get("integration:lastResult"),
+      this.ctx.storage.get("state"),
+      this.ctx.storage.get("database:v1:manifest"),
+      this.ctx.storage.getAlarm(),
+    ]);
+    return {
+      ok: true,
+      queue: {
+        pendingCount: Number(queue?.pendingCount || 0),
+        lastReceivedAt: Number(queue?.lastReceivedAt || 0) || null,
+        lastReceivedUpdateId: Number(queue?.lastReceivedUpdateId || 0) || null,
+        lastReceivedType: queue?.lastReceivedType || null,
+        lastProcessedAt: Number(queue?.lastProcessedAt || 0) || null,
+        lastProcessedUpdateId: Number(queue?.lastProcessedUpdateId || 0) || null,
+      },
+      integration: integration || null,
+      settings: {
+        botEnabled: state?.settings?.botEnabled !== false,
+        cacheEnabled: state?.settings?.cacheEnabled !== false,
+        autoUpdate: state?.settings?.autoUpdate !== false,
+      },
+      database: { installed: Boolean(manifest?.hash), bytes: Number(manifest?.bytes || 0), chunks: Number(manifest?.chunks || 0) },
+      nextAlarmAt: Number(alarmAt || 0) || null,
+    };
+  }
+}
+
+function getTelegramUpdateType(update) {
+  if (!update || typeof update !== "object") return "unknown";
+  return Object.keys(update).find((key) => key !== "update_id") || "unknown";
+}
+
+function jsonResponse(value, status = 200) {
+  return new Response(JSON.stringify(value, null, 2), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store, max-age=0",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
+async function telegramControlApi(method, payload = {}) {
+  const response = await fetch(`${BOT_API}${EMBEDDED_BOT_TOKEN}/${method}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(12_000),
+  });
+  const data = await response.json().catch(() => null);
+  if (!data || typeof data.ok !== "boolean") {
+    throw new Error(`TELEGRAM_${method.toUpperCase()}_INVALID_RESPONSE_HTTP_${response.status}`);
+  }
+  if (!data.ok) {
+    const description = String(data.description || `HTTP_${response.status}`).replaceAll(EMBEDDED_BOT_TOKEN, "[redacted]").slice(0, 180);
+    throw new Error(`TELEGRAM_${method.toUpperCase()}_FAILED:${description}`);
+  }
+  return data.result;
+}
+
+async function syncTelegramCommands(force = false) {
+  const ownerScope = { type: "chat", chat_id: Number(EMBEDDED_OWNER_TELEGRAM_ID) };
+  if (force) {
+    const scopes = [
+      null,
+      { type: "all_private_chats" },
+      { type: "all_group_chats" },
+      { type: "all_chat_administrators" },
+      ownerScope,
+    ];
+    for (const scope of scopes) {
+      await telegramControlApi("deleteMyCommands", scope ? { scope } : {});
+    }
+  }
+  const existing = await telegramControlApi("getMyCommands", { scope: ownerScope });
+  const correct = Array.isArray(existing) && existing.length === 1
+    && existing[0]?.command === "settings";
+  if (force || !correct) {
+    await telegramControlApi("setMyCommands", {
+      scope: ownerScope,
+      commands: [{ command: "settings", description: "Open owner settings" }],
+    });
+  }
+}
+
+async function ensureTelegramIntegration(force = false) {
+  const me = await telegramControlApi("getMe");
+  if (!me?.id || !me?.is_bot) throw new Error("TELEGRAM_GET_ME_INVALID_RESULT");
+  const current = await telegramControlApi("getWebhookInfo");
+  const currentAllowed = Array.isArray(current?.allowed_updates) ? [...current.allowed_updates].sort() : [];
+  const expectedAllowed = [...TELEGRAM_UPDATE_TYPES].sort();
+  const needsWebhookUpdate = force || current?.url !== WEBHOOK_URL
+    || JSON.stringify(currentAllowed) !== JSON.stringify(expectedAllowed);
+  if (needsWebhookUpdate) {
+    await telegramControlApi("setWebhook", {
+      url: WEBHOOK_URL,
+      secret_token: WEBHOOK_SECRET,
+      max_connections: WEBHOOK_MAX_CONNECTIONS,
+      allowed_updates: TELEGRAM_UPDATE_TYPES,
+      drop_pending_updates: false,
+    });
+  }
+  await syncTelegramCommands(force);
+  const verified = await telegramControlApi("getWebhookInfo");
+  if (verified?.url !== WEBHOOK_URL) throw new Error("TELEGRAM_WEBHOOK_VERIFICATION_FAILED");
+  return {
+    ok: true,
+    botId: me.id,
+    botUsername: me.username || null,
+    webhookUrl: verified.url,
+    pendingUpdates: Number(verified.pending_update_count || 0),
+    maxConnections: Number(verified.max_connections || WEBHOOK_MAX_CONNECTIONS),
+    allowedUpdateCount: Array.isArray(verified.allowed_updates) ? verified.allowed_updates.length : 0,
+    lastWebhookError: verified.last_error_message || null,
+  };
+}
+
+async function runScheduledBootstrap(env, reason = "cron") {
+  const stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
+  const claim = await stub.claimIntegrationCheck(Date.now(), WEBHOOK_CHECK_INTERVAL_MS, BUILD_VERSION);
+  if (!claim?.run) return { skipped: true, reason: claim?.reason || "interval" };
+  try {
+    const result = await ensureTelegramIntegration(Boolean(claim.force));
+    await stub.finishIntegrationCheck({ ...result, checkedAt: Date.now(), version: BUILD_VERSION });
+    console.log(JSON.stringify({ event: "telegram_integration_ready", reason, ...result }));
+    return result;
+  } catch (error) {
+    const message = String(error?.message || error).replaceAll(EMBEDDED_BOT_TOKEN, "[redacted]").slice(0, 220);
+    await stub.finishIntegrationCheck({ ok: false, checkedAt: Date.now(), version: BUILD_VERSION, error: message });
+    console.error(JSON.stringify({ event: "telegram_integration_failed", reason, error: message }));
+    return { ok: false, error: message };
+  }
 }
 
 function response(text, status = 200) {
@@ -3412,55 +3599,123 @@ function response(text, status = 200) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const requestId = request.headers.get("cf-ray") || crypto.randomUUID();
 
-    if (request.method === "GET" && url.pathname === "/healthz") {
-      return response("ok");
+    if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/healthz")) {
+      const stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
+      const [telegram, webhook, scheduler] = await Promise.all([
+        telegramControlApi("getMe").then((result) => ({
+          ok: true,
+          id: result.id,
+          username: result.username || null,
+        })).catch((error) => ({ ok: false, error: String(error?.message || error).slice(0, 180) })),
+        telegramControlApi("getWebhookInfo").then((result) => ({
+          ok: true,
+          url: result.url || "",
+          expectedUrl: WEBHOOK_URL,
+          matchesExpectedUrl: result.url === WEBHOOK_URL,
+          pendingUpdates: Number(result.pending_update_count || 0),
+          lastErrorAt: Number(result.last_error_date || 0) || null,
+          lastError: result.last_error_message || null,
+          allowedUpdateCount: Array.isArray(result.allowed_updates) ? result.allowed_updates.length : 0,
+        })).catch((error) => ({ ok: false, error: String(error?.message || error).slice(0, 180) })),
+        stub.getDiagnostics().catch((error) => ({ ok: false, error: String(error?.message || error).slice(0, 180) })),
+      ]);
+      const ok = Boolean(telegram.ok && webhook.ok && scheduler.ok && webhook.matchesExpectedUrl);
+      return jsonResponse({
+        service: "Forward Scheduler",
+        version: BUILD_VERSION,
+        status: ok ? "operational" : "degraded",
+        requestId,
+        worker: "online",
+        ownerConfigured: /^\d{1,20}$/.test(EMBEDDED_OWNER_TELEGRAM_ID),
+        telegram,
+        webhook,
+        scheduler,
+        checkedAt: new Date().toISOString(),
+      }, ok ? 200 : 503);
     }
 
-    // Telegram sends every update to this endpoint. Persist it in the Durable
-    // Object queue before acknowledging it, so Telegram can retry on failures.
     if (request.method === "POST" && url.pathname === "/telegram/webhook") {
+      console.log(JSON.stringify({
+        event: "telegram_webhook_request_received",
+        requestId,
+        method: request.method,
+        path: url.pathname,
+        contentLength: Number(request.headers.get("content-length") || 0),
+        hasSecretHeader: request.headers.has("x-telegram-bot-api-secret-token"),
+      }));
+
+      const suppliedSecret = request.headers.get("x-telegram-bot-api-secret-token") || "";
+      if (suppliedSecret !== WEBHOOK_SECRET) {
+        console.error(JSON.stringify({ event: "telegram_webhook_rejected", requestId, reason: "secret_mismatch" }));
+        return response("Unauthorized", 401);
+      }
+
+      const contentLength = Number(request.headers.get("content-length") || 0);
+      if (Number.isFinite(contentLength) && contentLength > 1_000_000) {
+        console.error(JSON.stringify({ event: "telegram_webhook_rejected", requestId, reason: "payload_too_large", contentLength }));
+        return response("Payload too large", 413);
+      }
+
+      let update;
       try {
-        // Telegram is configured with a webhook secret token. Require the
-        // header to be present; the queue and application logic still perform
-        // strict update validation and owner authorization.
-        const webhookSecretHeader = request.headers.get("x-telegram-bot-api-secret-token");
-        if (!webhookSecretHeader) return response("Unauthorized", 401);
-
-        const contentLength = Number(request.headers.get("content-length") || 0);
-        if (contentLength > 1_000_000) return response("Payload too large", 413);
-
-        const update = await request.json();
-        if (!update || !Number.isSafeInteger(update.update_id) || update.update_id < 0) {
-          return response("Invalid Telegram update", 400);
+        const rawBody = await request.text();
+        const actualBytes = new TextEncoder().encode(rawBody).byteLength;
+        if (actualBytes > 1_000_000) {
+          console.error(JSON.stringify({ event: "telegram_webhook_rejected", requestId, reason: "payload_too_large", actualBytes }));
+          return response("Payload too large", 413);
         }
+        update = JSON.parse(rawBody);
+      } catch (error) {
+        console.error(JSON.stringify({ event: "telegram_webhook_invalid_json", requestId, error: String(error?.message || error).slice(0, 120) }));
+        return response("Invalid JSON", 400);
+      }
+      if (!update || !Number.isSafeInteger(update.update_id) || update.update_id < 0) {
+        console.error(JSON.stringify({ event: "telegram_webhook_invalid_update", requestId }));
+        return response("Invalid Telegram update", 400);
+      }
 
+      const updateType = getTelegramUpdateType(update);
+      try {
         const stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
         const accepted = await stub.handleUpdate(update);
         if (!accepted?.queued) {
           console.error(JSON.stringify({
-            event: "telegram_webhook_queue_failed",
+            event: "telegram_webhook_queue_rejected",
+            requestId,
             updateId: update.update_id,
+            updateType,
             reason: String(accepted?.reason || "UPDATE_QUEUE_REJECTED").slice(0, 120),
           }));
           return response("Temporary queue failure", 503);
         }
-
         console.log(JSON.stringify({
-          event: "telegram_webhook_update_queued",
+          event: "telegram_webhook_update_accepted",
+          requestId,
           updateId: update.update_id,
+          updateType,
           duplicate: Boolean(accepted.duplicate),
+          pendingCount: Number(accepted.pendingCount || 0),
         }));
         return response("ok");
       } catch (error) {
         console.error(JSON.stringify({
-          event: "telegram_webhook_error",
-          message: String(error?.message || error).slice(0, 180),
+          event: "telegram_webhook_durable_object_error",
+          requestId,
+          updateId: update.update_id,
+          updateType,
+          error: String(error?.message || error).slice(0, 180),
         }));
-        return response("Temporary webhook error", 500);
+        return response("Temporary queue error", 503);
       }
     }
 
+    console.log(JSON.stringify({ event: "worker_route_not_found", requestId, method: request.method, path: url.pathname }));
     return response("Not Found", 404);
+  },
+
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(runScheduledBootstrap(env, `cron:${controller.cron || "unknown"}`));
   },
 };
