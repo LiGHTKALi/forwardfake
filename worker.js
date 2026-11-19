@@ -3410,32 +3410,57 @@ function response(text, status = 200) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
+
     if (request.method === "GET" && url.pathname === "/healthz") {
       return response("ok");
     }
-    return response("Forward Scheduler is active. Telegram updates are handled automatically.");
-  },
 
-  async scheduled(_controller, env) {
-    const stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
-    const result = await stub.pollTelegram();
-    if (!result?.ok) {
-      console.error(JSON.stringify({
-        event: "telegram_poll_failed",
-        reason: String(result?.reason || "UNKNOWN").slice(0, 180),
-        at: new Date().toISOString(),
-      }));
-      return;
+    // Telegram sends every update to this endpoint. Persist it in the Durable
+    // Object queue before acknowledging it, so Telegram can retry on failures.
+    if (request.method === "POST" && url.pathname === "/telegram/webhook") {
+      try {
+        // Telegram is configured with a webhook secret token. Require the
+        // header to be present; the queue and application logic still perform
+        // strict update validation and owner authorization.
+        const webhookSecretHeader = request.headers.get("x-telegram-bot-api-secret-token");
+        if (!webhookSecretHeader) return response("Unauthorized", 401);
+
+        const contentLength = Number(request.headers.get("content-length") || 0);
+        if (contentLength > 1_000_000) return response("Payload too large", 413);
+
+        const update = await request.json();
+        if (!update || !Number.isSafeInteger(update.update_id) || update.update_id < 0) {
+          return response("Invalid Telegram update", 400);
+        }
+
+        const stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
+        const accepted = await stub.handleUpdate(update);
+        if (!accepted?.queued) {
+          console.error(JSON.stringify({
+            event: "telegram_webhook_queue_failed",
+            updateId: update.update_id,
+            reason: String(accepted?.reason || "UPDATE_QUEUE_REJECTED").slice(0, 120),
+          }));
+          return response("Temporary queue failure", 503);
+        }
+
+        console.log(JSON.stringify({
+          event: "telegram_webhook_update_queued",
+          updateId: update.update_id,
+          duplicate: Boolean(accepted.duplicate),
+        }));
+        return response("ok");
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: "telegram_webhook_error",
+          message: String(error?.message || error).slice(0, 180),
+        }));
+        return response("Temporary webhook error", 500);
+      }
     }
-    if (result.received) {
-      console.log(JSON.stringify({
-        event: "telegram_updates_received",
-        received: result.received,
-        queued: result.queued,
-        duplicates: result.duplicates,
-      }));
-    }
+
+    return response("Not Found", 404);
   },
 };
