@@ -4,7 +4,7 @@ import { DurableObject } from "cloudflare:workers";
 const EMBEDDED_BOT_TOKEN = "9100041417:AAHYOpFKKTGpBQpdHoTAExwZYzlXPqOtSjg";
 const EMBEDDED_OWNER_TELEGRAM_ID = "8621035125";
 const DO_NAME = "forward-scheduler-owner";
-const BUILD_VERSION = "5.4.1";
+const BUILD_VERSION = "5.4.2";
 const WEBHOOK_URL = "https://forwardfake.killerdutchmobin.workers.dev/telegram/webhook";
 const WEBHOOK_SECRET = "fwd_scheduler_8621035125_5_4_0_telegram_edge";
 const WEBHOOK_MAX_CONNECTIONS = 10;
@@ -120,6 +120,19 @@ function validateDatabase(database) {
   if (!Number.isInteger(database.schemaVersion) || database.schemaVersion < 4 || database.schemaVersion > 5) throw new Error("database_schema_version_unsupported");
   if (!database.texts || typeof database.texts !== "object" || Array.isArray(database.texts)) throw new Error("database_texts_missing");
   if (!database.features || typeof database.features !== "object" || Array.isArray(database.features)) throw new Error("database_features_missing");
+  if (database.commandMenu != null) {
+    if (!Array.isArray(database.commandMenu) || database.commandMenu.length > 100) throw new Error("database_command_menu_invalid");
+    for (const [index, item] of database.commandMenu.entries()) {
+      if (!item || typeof item !== "object" || Array.isArray(item)
+        || !/^\/?[a-z][a-z0-9_]{0,31}$/.test(String(item.command || ""))
+        || String(item.command || "").toLowerCase().replace(/^\//, "") === "settings"
+        || typeof item.response !== "string" || !item.response.trim() || item.response.length > 8_000
+        || (item.description != null && (typeof item.description !== "string" || item.description.trim().length < 3 || item.description.length > 256))
+        || (item.enabled != null && typeof item.enabled !== "boolean")) {
+        throw new Error(`database_command_menu_item_invalid:${index}`);
+      }
+    }
+  }
 
   const roles = database.roles ?? {};
   for (const field of ["adminIds", "protectedIds"]) {
@@ -185,8 +198,8 @@ function validateDatabase(database) {
     if (!config || typeof config !== "object" || Array.isArray(config)) {
       throw new Error(`database_feature_config_missing:${descriptor.id}`);
     }
-    if (config.enabled != null && typeof config.enabled !== "boolean") {
-      throw new Error(`database_feature_enabled_invalid:${descriptor.id}`);
+    if (typeof config.enabled !== "boolean") {
+      throw new Error(`database_feature_enabled_required:${descriptor.id}`);
     }
   }
 
@@ -428,57 +441,89 @@ function makeKeyboardButton(text, callbackData, style = "primary") {
   return button;
 }
 
-// Declarative feature modules. The Worker core only orchestrates these modules;
-// all user-editable defaults, texts, rules, and per-feature settings live in database.js.
+// Executable feature handlers are part of the Worker runtime. Feature flags,
+// command names, texts, rules, and policies are read from the uploaded database.
 const FEATURE_MODULES = Object.freeze([
-  { id: "chatbot", title: "NLP Chatbot", category: "Engagement", description: "Database-driven responses based on rules and keywords.", path: "features.chatbot.enabled", settingsPath: "features.chatbot", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "jokes", title: "Jokes and Entertainment", category: "Engagement", description: "Responds to joke requests and database-defined entertainment content.", path: "features.jokes.enabled", settingsPath: "features.jokes", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "chatter", title: "Scheduled Chat", category: "Engagement", description: "Sends scheduled messages with configurable intervals and jitter.", path: "features.chatter.enabled", settingsPath: "features.chatter", defaultEnabled: false, requiredPermission: "send_messages", executionType: "alarm" },
-  { id: "customCommands", title: "Custom Commands", category: "Engagement", description: "Custom commands and replies are defined in the database.", path: "features.customCommands.enabled", settingsPath: "features.customCommands", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "automations", title: "Rule-based Automation", category: "Engagement", description: "Executes safe replies or alerts based on database rules.", path: "features.automations.enabled", settingsPath: "features.automations", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "memory", title: "Conversation Memory", category: "Engagement", description: "Short-term memory with TTL and automatic cleanup.", path: "features.memory.enabled", settingsPath: "features.memory", defaultEnabled: true, requiredPermission: "durable_storage", executionType: "per-chat" },
-  { id: "botReplyJokes", title: "Bot Reply Jokes", category: "Engagement", description: "Provides playful responses to selected replies.", path: "features.botReplyJokes.enabled", settingsPath: "features.botReplyJokes", defaultEnabled: false, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "welcome", title: "Welcome Messages", category: "Members", description: "Idempotent welcome messages for new members and bot joins.", path: "features.welcome.enabled", settingsPath: "features.welcome", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "goodbye", title: "Goodbye Messages", category: "Members", description: "Announces when a member leaves a group.", path: "features.goodbye.enabled", settingsPath: "features.goodbye", defaultEnabled: false, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "captcha", title: "Join CAPTCHA", category: "Members", description: "Temporarily restricts new members pending button confirmation.", path: "features.captcha.enabled", settingsPath: "features.captcha", defaultEnabled: false, requiredPermission: "restrict_members", executionType: "per-group" },
-  { id: "joinRequests", title: "Join Requests", category: "Members", description: "Processes requests to join a group.", path: "features.joinRequests.enabled", settingsPath: "features.joinRequests", defaultEnabled: false, requiredPermission: "invite_users", executionType: "per-group" },
-  { id: "reports", title: "Reports", category: "Members", description: "Records reports and sends a summary to the owner.", path: "features.reports.enabled", settingsPath: "features.reports", defaultEnabled: true, requiredPermission: "send_messages", executionType: "per-group" },
-  { id: "antiSpam", title: "Anti-Spam and Anti-Flood", category: "Security", description: "Detects rate spikes, duplicates, links, mentions, commands, and message floods.", path: "features.antiSpam.enabled", settingsPath: "features.antiSpam", defaultEnabled: true, requiredPermission: "delete_messages", executionType: "per-group" },
-  { id: "moderation", title: "Message and Member Moderation", category: "Security", description: "Warnings, deletion, bans, kicks, restrictions, and unrestrictions with permission checks.", path: "features.moderation.enabled", settingsPath: "features.moderation", defaultEnabled: true, requiredPermission: "administrator", executionType: "per-group" },
-  { id: "linkGuard", title: "Link Filter", category: "Security", description: "Enforces blocked-domain and allow-list policies.", path: "features.linkGuard.enabled", settingsPath: "features.linkGuard", defaultEnabled: true, requiredPermission: "delete_messages", executionType: "per-group" },
-  { id: "phishingGuard", title: "Anti-Phishing", category: "Security", description: "Detects configured suspicious phrases and domains.", path: "features.phishingGuard.enabled", settingsPath: "features.phishingGuard", defaultEnabled: true, requiredPermission: "delete_messages", executionType: "per-group" },
-  { id: "raidProtection", title: "Raid Protection", category: "Security", description: "Detects join spikes using configurable thresholds and time windows.", path: "features.raidProtection.enabled", settingsPath: "features.raidProtection", defaultEnabled: false, requiredPermission: "restrict_members", executionType: "per-group" },
-  { id: "forwarding", title: "Forward Scheduling", category: "Scheduling", description: "Schedules forwards to group destinations; direct channel publishing is disabled.", path: "features.forwarding.enabled", settingsPath: "features.forwarding", defaultEnabled: true, requiredPermission: "send_messages", executionType: "alarm" },
-  { id: "groupControls", title: "Group Reply Controls", category: "Management", description: "Database-configured command and buttons with live administrator verification.", path: "features.groupControls.enabled", settingsPath: "features.groupControls", defaultEnabled: true, requiredPermission: "administrator", executionType: "per-group" },
-  { id: "tagKnownMembers", title: "Tag Known Members", category: "Management", description: "Previews and tags known members from actual updates, not the full member list.", path: "features.tagKnownMembers.enabled", settingsPath: "features.tagKnownMembers", defaultEnabled: false, requiredPermission: "administrator", executionType: "per-group" },
+  { id: "chatbot", path: "features.chatbot.enabled" },
+  { id: "jokes", path: "features.jokes.enabled" },
+  { id: "chatter", path: "features.chatter.enabled" },
+  { id: "customCommands", path: "features.customCommands.enabled" },
+  { id: "automations", path: "features.automations.enabled" },
+  { id: "memory", path: "features.memory.enabled" },
+  { id: "botReplyJokes", path: "features.botReplyJokes.enabled" },
+  { id: "welcome", path: "features.welcome.enabled" },
+  { id: "goodbye", path: "features.goodbye.enabled" },
+  { id: "captcha", path: "features.captcha.enabled" },
+  { id: "joinRequests", path: "features.joinRequests.enabled" },
+  { id: "reports", path: "features.reports.enabled" },
+  { id: "antiSpam", path: "features.antiSpam.enabled" },
+  { id: "moderation", path: "features.moderation.enabled" },
+  { id: "linkGuard", path: "features.linkGuard.enabled" },
+  { id: "phishingGuard", path: "features.phishingGuard.enabled" },
+  { id: "raidProtection", path: "features.raidProtection.enabled" },
+  { id: "forwarding", path: "features.forwarding.enabled" },
+  { id: "groupControls", path: "features.groupControls.enabled" },
+  { id: "tagKnownMembers", path: "features.tagKnownMembers.enabled" },
 ]);
 
 function getFeatureModule(id) {
   return FEATURE_MODULES.find((item) => item.id === String(id)) || null;
 }
 
-function isModuleEnabled(database, overrides, id) {
+function isModuleEnabled(database, id) {
   const descriptor = getFeatureModule(id);
   if (!descriptor) return false;
-  const override = overrides && Object.hasOwn(overrides, id) ? overrides[id] : undefined;
-  if (typeof override === "boolean") return override;
   let current = database;
   for (const part of descriptor.path.split(".")) current = current?.[part];
-  return typeof current === "boolean" ? current : descriptor.defaultEnabled;
+  return current === true;
 }
 
-function paginateModules(page = 0, pageSize = 6) {
-  const safePageSize = Math.max(2, Math.min(12, Math.floor(Number(pageSize) || 6)));
-  const totalPages = Math.max(1, Math.ceil(FEATURE_MODULES.length / safePageSize));
-  const currentPage = Math.max(0, Math.min(totalPages - 1, Math.floor(Number(page) || 0)));
-  const start = currentPage * safePageSize;
-  return {
-    page: currentPage,
-    totalPages,
-    items: FEATURE_MODULES.slice(start, start + safePageSize),
-    hasPrevious: currentPage > 0,
-    hasNext: currentPage < totalPages - 1,
+function collectDatabaseTelegramCommands(database) {
+  if (!database || typeof database !== "object") return [];
+  const commands = new Map();
+  const add = (raw, fallbackDescription = "Database command", enabled = true) => {
+    if (enabled === false || raw == null || commands.size >= 100) return;
+    const record = typeof raw === "string" ? { command: raw } : raw;
+    if (!record || typeof record !== "object") return;
+    const normalized = configuredCommand(record.command || record.name || "");
+    if (!normalized || normalized === "/settings") return;
+    const command = normalized.slice(1);
+    const description = String(record.description || record.help || fallbackDescription || "Database command")
+      .replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 256);
+    if (description.length < 3) return;
+    if (!commands.has(command)) commands.set(command, { command, description });
   };
+
+  const features = database.features || {};
+  // commandMenu entries are executable response commands, not arbitrary menu labels.
+  if (features.customCommands?.enabled !== false) {
+    for (const item of database.commandMenu || []) add(item, "Database command", item?.enabled !== false);
+    for (const item of features.customCommands?.rules || []) {
+      add(item, "Custom database command", item?.enabled !== false);
+    }
+  }
+  const moderationDescriptions = {
+    ban: "Ban a replied group member",
+    kick: "Remove a replied group member",
+    mute: "Mute a replied group member",
+    unmute: "Unmute a replied group member",
+    unban: "Unban a replied group member",
+    delete: "Delete a replied message",
+    pin: "Pin a replied message",
+    warn: "Warn a replied group member",
+  };
+  for (const item of features.moderation?.commands || []) {
+    add(item, moderationDescriptions[String(item?.action || "").toLowerCase()] || "Moderation command",
+      features.moderation?.enabled !== false && item?.enabled !== false);
+  }
+  if (features.reports?.command) add({ command: features.reports.command, description: features.reports.description || "Report a message to group administrators" }, "Report a message to group administrators", features.reports.enabled !== false);
+  if (features.groupControls?.command) add({ command: features.groupControls.command, description: features.groupControls.description || "Control bot replies in this group" }, "Control bot replies in this group", features.groupControls.enabled !== false);
+  const tagCommands = features.tagKnownMembers?.commands || {};
+  add({ command: tagCommands.tagAll, description: tagCommands.tagAllDescription || "Preview a tag for known group members" }, "Preview a tag for known group members", features.tagKnownMembers?.enabled !== false);
+  add({ command: tagCommands.tagOptIn, description: tagCommands.tagOptInDescription || "Allow administrators to include you in tags" }, "Allow tag participation", features.tagKnownMembers?.enabled !== false);
+  add({ command: tagCommands.tagOptOut, description: tagCommands.tagOptOutDescription || "Opt out of group tags" }, "Opt out of group tags", features.tagKnownMembers?.enabled !== false);
+
+  return [...commands.values()].slice(0, 100);
 }
 
 function escapeHtml(value) {
@@ -499,14 +544,6 @@ function configuredCommand(value) {
   return /^\/[a-z][a-z0-9_]{0,31}$/.test(command) ? command : "";
 }
 
-
-function getModuleConfig(database, id) {
-  const descriptor = getFeatureModule(id);
-  if (!descriptor) return null;
-  let current = database;
-  for (const part of descriptor.path.split(".").slice(0, -1)) current = current?.[part];
-  return current && typeof current === "object" && !Array.isArray(current) ? current : null;
-}
 
 function getTelegramUpdateActor(update) {
   return update?.message?.from?.id
@@ -714,7 +751,6 @@ function defaultState() {
     rate: {},
     updateIds: [],
     quota: { day: utcDay(), publicRequests: 0, ownerRequests: 0, totalRequests: 0 },
-    moduleOverrides: {},
     groupModuleOverrides: {},
     welcomeDedup: {},
     groups: {},
@@ -767,9 +803,10 @@ function mergeState(value) {
       migratedFrom: "v2.x",
     };
   }
+  const { moduleOverrides: _legacyModuleOverrides, ...cleanValue } = value;
   return {
     ...base,
-    ...value,
+    ...cleanValue,
     db: null,
     forwardTask,
     groupSettings: value.groupSettings && typeof value.groupSettings === "object" && !Array.isArray(value.groupSettings) ? value.groupSettings : {},
@@ -784,8 +821,6 @@ function mergeState(value) {
       ownerRequests: Math.max(0, Math.floor(Number(value.quota?.ownerRequests) || 0)),
       totalRequests: Math.max(0, Math.floor(Number(value.quota?.totalRequests) || 0)),
     },
-    moduleOverrides: value.moduleOverrides && typeof value.moduleOverrides === "object" && !Array.isArray(value.moduleOverrides)
-      ? Object.fromEntries(Object.entries(value.moduleOverrides).filter(([key, flag]) => getFeatureModule(key) && typeof flag === "boolean")) : {},
     groups: value.groups && typeof value.groups === "object" && !Array.isArray(value.groups) ? value.groups : {},
     groupUsage: value.groupUsage && typeof value.groupUsage === "object" && !Array.isArray(value.groupUsage) ? value.groupUsage : {},
     groupModuleOverrides: value.groupModuleOverrides && typeof value.groupModuleOverrides === "object" && !Array.isArray(value.groupModuleOverrides)
@@ -1022,7 +1057,7 @@ class ForwardSchedulerRuntime {
 
   #featureEnabled(state, id, chatId = null) {
     // A global OFF is authoritative; per-group overrides can only narrow an ON module.
-    const globallyEnabled = isModuleEnabled(this.#db(state), state.moduleOverrides, id);
+    const globallyEnabled = isModuleEnabled(this.#db(state), id);
     if (!globallyEnabled) return false;
     const local = chatId == null ? undefined : state?.groupModuleOverrides?.[String(chatId)]?.[id];
     return typeof local === "boolean" ? local : true;
@@ -1182,63 +1217,11 @@ class ForwardSchedulerRuntime {
       inline_keyboard: [
         [button(`Cache: ${cacheEnabled ? "ON" : "OFF"}`, "settings:toggle:cache", cacheEnabled ? "success" : "danger")],
         [button(`Auto Update: ${autoUpdate ? "ON" : "OFF"}`, "settings:toggle:auto", autoUpdate ? "success" : "danger")],
-        [button("Manage Features", "settings:features", "primary")],
         [button("Clear Cache", "settings:clear-cache", "primary")],
         [button(databaseInstalled ? "Replace Database" : "Install Database", "settings:install", "success"), button("Delete Database", "settings:delete", "danger")],
         [button(botEnabled ? "Shutdown Bot" : "Enable Bot", "settings:toggle:bot", botEnabled ? "danger" : "success")],
       ],
     };
-  }
-
-  #featuresKeyboard(state, page = 0) {
-    const pagination = paginateModules(page, 5);
-    const databaseInstalled = Boolean(this.#db(state));
-    const rows = pagination.items.map((feature) => {
-      const enabled = databaseInstalled && this.#featureEnabled(state, feature.id);
-      return [button(
-        `${feature.title}: ${enabled ? "ON" : "OFF"}`,
-        `settings:feature:toggle:${feature.id}`,
-        enabled ? "success" : "danger",
-      )];
-    });
-    const navigation = [];
-    if (pagination.hasPrevious) navigation.push(button("Previous", `settings:features:page:${pagination.page - 1}`, "primary"));
-    navigation.push(button("Back to Settings", "settings:features:back", "primary"));
-    if (pagination.hasNext) navigation.push(button("Next", `settings:features:page:${pagination.page + 1}`, "primary"));
-    rows.push(navigation);
-    return { inline_keyboard: rows };
-  }
-
-  #featuresText(state, page = 0, note = "") {
-    const pagination = paginateModules(page, 5);
-    const databaseInstalled = Boolean(this.#db(state));
-    const lines = [
-      "<b>FEATURE MANAGEMENT</b>",
-      `Page ${pagination.page + 1} / ${pagination.totalPages}`,
-      `Database: ${databaseInstalled ? "INSTALLED" : "NOT INSTALLED"}`,
-      "",
-    ];
-    for (const feature of pagination.items) {
-      const enabled = databaseInstalled && this.#featureEnabled(state, feature.id);
-      lines.push(`${enabled ? "🟢" : "🔴"} <b>${escapeHtml(feature.title)}</b> — ${enabled ? "ENABLED" : "DISABLED"}`);
-    }
-    if (note) lines.push("", escapeHtml(note));
-    if (!databaseInstalled) lines.push("", "<i>Install a database to activate database-driven features.</i>");
-    return lines.join("\n");
-  }
-
-  async #editFeaturesPanel(state, callback, page = 0, note = "", force = false) {
-    if (!force && state.settings?.autoUpdate === false) return;
-    const message = callback?.message || {};
-    if (message.chat?.id == null || message.message_id == null) return;
-    await this.#telegram(state, "editMessageText", {
-      chat_id: message.chat.id,
-      message_id: message.message_id,
-      text: this.#featuresText(state, page, note),
-      parse_mode: "HTML",
-      reply_markup: this.#featuresKeyboard(state, page),
-      link_preview_options: { is_disabled: true },
-    }, { bypassLocalRate: true });
   }
 
   #settingsText(state, note = "") {
@@ -1262,22 +1245,45 @@ class ForwardSchedulerRuntime {
       console.error(JSON.stringify({ event: "telegram_command_menu_owner_missing" }));
       return false;
     }
+
+    const databaseCommands = collectDatabaseTelegramCommands(this.#db(state));
     const results = [];
-    results.push(await this.#telegram(state, "deleteMyCommands", {}, { bypassLocalRate: true }));
-    for (const scope of ["all_private_chats", "all_group_chats", "all_chat_administrators"]) {
-      results.push(await this.#telegram(state, "deleteMyCommands", { scope: { type: scope } }, { bypassLocalRate: true }));
+    const scopesToClear = [
+      null,
+      { type: "all_private_chats" },
+      { type: "all_group_chats" },
+      { type: "all_chat_administrators" },
+      { type: "chat", chat_id: Number(ownerId) },
+    ];
+    for (const scope of scopesToClear) {
+      results.push(await this.#telegram(state, "deleteMyCommands", scope ? { scope } : {}, { bypassLocalRate: true }));
     }
-    results.push(await this.#telegram(state, "deleteMyCommands", { scope: { type: "chat", chat_id: Number(ownerId) } }, { bypassLocalRate: true }));
+    if (databaseCommands.length) {
+      results.push(await this.#telegram(state, "setMyCommands", {
+        scope: { type: "all_group_chats" },
+        commands: databaseCommands,
+      }, { bypassLocalRate: true }));
+    }
     results.push(await this.#telegram(state, "setMyCommands", {
       scope: { type: "chat", chat_id: Number(ownerId) },
       commands: [{ command: "settings", description: "Open owner settings" }],
     }, { bypassLocalRate: true }));
+
     const failures = results.filter((item) => !item?.ok);
     if (failures.length) {
-      console.error(JSON.stringify({ event: "telegram_command_menu_sync_failed", failures: failures.map((item) => ({ errorCode: item.error_code || 0, description: String(item.description || "UNKNOWN").slice(0, 120) })) }));
+      console.error(JSON.stringify({
+        event: "telegram_command_menu_sync_failed",
+        failures: failures.map((item) => ({ errorCode: item.error_code || 0, description: String(item.description || "UNKNOWN").slice(0, 120) })),
+        databaseCommandCount: databaseCommands.length,
+      }));
       return false;
     }
-    console.log(JSON.stringify({ event: "telegram_command_menu_synced", ownerChatId: ownerId, commands: ["settings"] }));
+    console.log(JSON.stringify({
+      event: "telegram_command_menu_synced",
+      ownerChatId: ownerId,
+      ownerCommands: ["settings"],
+      databaseGroupCommands: databaseCommands.map((item) => item.command),
+    }));
     return true;
   }
 
@@ -1311,31 +1317,8 @@ class ForwardSchedulerRuntime {
   async #handleSettingsCallback(state, callback) {
     const data = asText(callback.data);
     const chatId = callback.message.chat.id;
-    if (data === "settings:features") {
-      await this.#editFeaturesPanel(state, callback, 0, "", true);
-      return;
-    }
-    if (data === "settings:features:back") {
-      await this.#editSettingsPanel(state, callback, "Settings refreshed.", true);
-      return;
-    }
-    const featurePage = data.match(/^settings:features:page:(\d{1,3})$/);
-    if (featurePage) {
-      await this.#editFeaturesPanel(state, callback, Number(featurePage[1]), "", true);
-      return;
-    }
-    const featureToggle = data.match(/^settings:feature:toggle:([a-zA-Z][a-zA-Z0-9]{1,31})$/);
-    if (featureToggle) {
-      const feature = getFeatureModule(featureToggle[1]);
-      if (!feature) {
-        await this.#answerCallback(callback.id, "Unknown feature.");
-        return;
-      }
-      const currentlyEnabled = Boolean(this.#db(state)) && this.#featureEnabled(state, feature.id);
-      state.moduleOverrides[feature.id] = !currentlyEnabled;
-      await this.#save(state);
-      const currentPage = Math.max(0, FEATURE_MODULES.findIndex((item) => item.id === feature.id) / 5 | 0);
-      await this.#editFeaturesPanel(state, callback, currentPage, `${feature.title}: ${!currentlyEnabled ? "ENABLED" : "DISABLED"}.`);
+    if (data.startsWith("settings:features") || data.startsWith("settings:feature:")) {
+      await this.#answerCallback(callback.id, "Feature controls are managed by the database.");
       return;
     }
     if (data === "settings:toggle:cache") {
@@ -1398,6 +1381,7 @@ class ForwardSchedulerRuntime {
       state.deleteDatabasePendingAt = null;
       const removed = await this.#deleteDatabase(state);
       await this.#save(state);
+      await this.#syncCommandMenu(state, this.#ownerId(state));
       await this.#editSettingsPanel(state, callback, `Database deleted. ${removed} stored items removed.`);
       return;
     }
@@ -1738,7 +1722,9 @@ class ForwardSchedulerRuntime {
       return false;
     }
 
+    let commandMenuSynced = false;
     try {
+      commandMenuSynced = await this.#syncCommandMenu(state, this.#ownerId(state));
       await this.#completeResourceCleanup(state);
       await this.#scheduleNext(state);
     } catch (cleanupError) {
@@ -1752,6 +1738,8 @@ class ForwardSchedulerRuntime {
       `Version: ${database.version || "unknown"}`,
       `File size: ${sourceBytes.byteLength.toLocaleString("en-US")} bytes`,
       `Rules: ${database.features?.chatbot?.rules?.length || 0}`,
+      `Group commands: ${collectDatabaseTelegramCommands(database).length}`,
+      `Command menu: ${commandMenuSynced ? "SYNCED" : "SYNC FAILED - RETRY WITH /settings"}`,
       `Resources created: ${resourceReport.created}`,
       `Resources updated: ${resourceReport.updated}`,
       `Resources removed: ${resourceReport.removed}`,
@@ -2781,7 +2769,7 @@ class ForwardSchedulerRuntime {
           state.groupModuleOverrides[groupKey] ||= {};
           state.groupModuleOverrides[groupKey][featureId] = desired;
           await this.#save(state);
-          await this.#reply(message, `✅ Module ${getFeatureModule(featureId).title} was turned ${desired ? "ON" : "OFF"} in this group.`, state);
+          await this.#reply(message, `✅ ${featureId} was turned ${desired ? "ON" : "OFF"} in this group.`, state);
           await this.#scheduleNext(state);
           return;
         }
@@ -2793,7 +2781,10 @@ class ForwardSchedulerRuntime {
 
     if (this.#featureEnabled(state, "customCommands", groupKey) && text.startsWith("/")) {
       const parsed = parseCommand(text);
-      const custom = db.features?.customCommands?.rules || [];
+      const custom = [
+        ...(db.features?.customCommands?.rules || []),
+        ...(Array.isArray(db.commandMenu) ? db.commandMenu : []),
+      ];
       const rule = custom.find((item) => String(item.command || "").toLowerCase() === parsed?.command && item.enabled !== false);
       if (rule?.response) {
         await this.#reply(message, renderTemplate(rule.response, { user: userDisplay(user), username: user.username || "", chat: chat.title || "Group" }), state);
@@ -3518,7 +3509,6 @@ async function syncTelegramCommands(force = false) {
     const scopes = [
       null,
       { type: "all_private_chats" },
-      { type: "all_group_chats" },
       { type: "all_chat_administrators" },
       ownerScope,
     ];
