@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const DO_NAME = "forward-scheduler-owner";
-const BUILD_VERSION = "5.4.13-config-driven-runtime";
+const BUILD_VERSION = "5.4.16-modular-runtime";
 const EMBEDDED_BOT_TOKEN = "9100041417:AAHYOpFKKTGpBQpdHoTAExwZYzlXPqOtSjg";
 const EMBEDDED_OWNER_TELEGRAM_ID = "8621035125";
 const EMBEDDED_WEBHOOK_SECRET = "fwd_scheduler_8621035125_5_4_0_telegram_edge";
@@ -24,6 +24,23 @@ const TELEGRAM_HOSTS = new Set(["t.me", "www.t.me", "telegram.me", "www.telegram
 const USERNAME_RE = /^[A-Za-z][A-Za-z0-9_]{4,31}$/;
 const RESOURCE_ID_RE = /^[a-z][a-z0-9_-]{1,47}$/;
 const RESOURCE_TYPES = new Set(["kv", "cache", "memory", "counter", "queue", "index"]);
+
+// Stable extension contract: database actions use these modules and the shared
+// Telegram gateway. New Bot API methods automatically pass through that gateway.
+const RUNTIME_MODULE_REGISTRY = Object.freeze({
+  core: Object.freeze({ actions: ["reply", "send_message", "resource_set", "resource_get"] }),
+  telegram: Object.freeze({ actions: ["telegram"], gateway: "requestTelegramApi" }),
+  group: Object.freeze({ actions: ["toggle_feature", "set_group_setting", "delete_group_setting"] }),
+  owner: Object.freeze({ actions: ["target_policy_set", "owner_panel_show", "owner_target_message_compose", "owner_panel_refresh_target"] }),
+  broadcast: Object.freeze({ actions: ["owner_broadcast_compose"], queue: "durable-alarm" }),
+});
+
+const DATABASE_ACTION_TYPES = new Set([
+  "reply", "send_message", "telegram", "toggle_feature", "set_group_setting",
+  "delete_group_setting", "resource_set", "resource_get", "target_policy_set",
+  "owner_panel_show", "owner_target_message_compose", "owner_broadcast_compose",
+  "owner_panel_refresh_target",
+]);
 
 function asText(value) {
   return value == null ? "" : String(value).trim();
@@ -480,7 +497,7 @@ function validateDatabase(database) {
         }
       }
       if (command.actions != null) {
-        const actionTypes = new Set(["reply", "send_message", "telegram", "toggle_feature", "set_group_setting", "delete_group_setting", "resource_set", "resource_get", "target_policy_set", "owner_panel_show"]);
+        const actionTypes = DATABASE_ACTION_TYPES;
         if (!Array.isArray(command.actions) || command.actions.length < 1 || command.actions.length > 25) throw new Error(`database_command_actions_invalid:${index}`);
         for (const [actionIndex, action] of command.actions.entries()) {
           if (!action || typeof action !== "object" || Array.isArray(action) || !actionTypes.has(String(action.type || ""))) {
@@ -582,9 +599,100 @@ function validateDatabase(database) {
         ids.add(String(action.id));
         for (const [actionIndex, step] of action.actions.entries()) {
           if (!step || typeof step !== "object" || Array.isArray(step)
-            || !new Set(["reply", "send_message", "telegram", "toggle_feature", "set_group_setting", "delete_group_setting", "resource_set", "resource_get", "target_policy_set", "owner_panel_show"]).has(String(step.type || ""))) {
+            || !DATABASE_ACTION_TYPES.has(String(step.type || ""))) {
             throw new Error(`database_owner_panel_action_step_invalid:${field}:${index}:${actionIndex}`);
           }
+        }
+      }
+    }
+  }
+
+  if (database.callbackRoutes != null) {
+    if (!Array.isArray(database.callbackRoutes) || database.callbackRoutes.length > 100) {
+      throw new Error("database_callback_routes_invalid");
+    }
+    const callbackRouteIds = new Set();
+    const callbackPrefixes = new Set();
+    const reservedNamespaces = new Set(["owneradmin", "settings", "help", "captcha", "group", "tag", "g5", "t5"]);
+    for (const [index, route] of database.callbackRoutes.entries()) {
+      const id = String(route?.id || "");
+      const prefix = String(route?.prefix || "");
+      if (!route || typeof route !== "object" || Array.isArray(route)
+        || !/^[a-z][a-z0-9_-]{1,47}$/.test(id) || callbackRouteIds.has(id)
+        || !/^[A-Za-z][A-Za-z0-9:_-]{1,35}$/.test(prefix) || callbackPrefixes.has(prefix)
+        || reservedNamespaces.has(prefix.split(":", 1)[0].toLowerCase())
+        || (route.enabled != null && typeof route.enabled !== "boolean")
+        || !["prefix", "exact"].includes(String(route.match || "prefix"))
+        || !Array.isArray(route.actions) || route.actions.length < 1 || route.actions.length > 25) {
+        throw new Error(`database_callback_route_invalid:${index}`);
+      }
+      callbackRouteIds.add(id);
+      callbackPrefixes.add(prefix);
+      const access = route.access || {};
+      if (access.scope != null && !["group_or_supergroup", "private", "any_chat"].includes(access.scope)) {
+        throw new Error(`database_callback_route_access_invalid:${index}`);
+      }
+      if (access.requiredRole != null && !["owner", "creator", "administrator", "creator_or_administrator", "member", "any"].includes(access.requiredRole)) {
+        throw new Error(`database_callback_route_role_invalid:${index}`);
+      }
+      if (access.verification != null && !["telegram_live_membership", "none"].includes(access.verification)) {
+        throw new Error(`database_callback_route_verification_invalid:${index}`);
+      }
+      if (access.botOwnerBypass != null && typeof access.botOwnerBypass !== "boolean") {
+        throw new Error(`database_callback_route_bypass_invalid:${index}`);
+      }
+      for (const [actionIndex, action] of route.actions.entries()) {
+        if (!action || typeof action !== "object" || Array.isArray(action) || !DATABASE_ACTION_TYPES.has(String(action.type || ""))) {
+          throw new Error(`database_callback_route_action_invalid:${index}:${actionIndex}`);
+        }
+        if (action.type === "telegram" && (!/^[A-Za-z][A-Za-z0-9]{1,63}$/.test(String(action.method || ""))
+          || !action.payload || typeof action.payload !== "object" || Array.isArray(action.payload))) {
+          throw new Error(`database_callback_route_telegram_action_invalid:${index}:${actionIndex}`);
+        }
+      }
+    }
+  }
+
+  if (database.updateRoutes != null) {
+    if (!Array.isArray(database.updateRoutes) || database.updateRoutes.length > 100) {
+      throw new Error("database_update_routes_invalid");
+    }
+    const routeIds = new Set();
+    for (const [index, route] of database.updateRoutes.entries()) {
+      const id = String(route?.id || "");
+      if (!route || typeof route !== "object" || Array.isArray(route)
+        || !/^[a-z][a-z0-9_-]{1,47}$/.test(id) || routeIds.has(id)
+        || !TELEGRAM_UPDATE_TYPES.includes(String(route.updateType || ""))
+        || String(route.updateType) === "callback_query"
+        || (route.enabled != null && typeof route.enabled !== "boolean")
+        || !Array.isArray(route.actions) || route.actions.length < 1 || route.actions.length > 25) {
+        throw new Error(`database_update_route_invalid:${index}`);
+      }
+      routeIds.add(id);
+      const access = route.access || {};
+      if (access.scope != null && !["group_or_supergroup", "private", "any_chat"].includes(access.scope)) {
+        throw new Error(`database_update_route_access_invalid:${index}`);
+      }
+      if (access.requiredRole != null && !["owner", "creator", "administrator", "creator_or_administrator", "member", "any"].includes(access.requiredRole)) {
+        throw new Error(`database_update_route_role_invalid:${index}`);
+      }
+      if (access.verification != null && !["telegram_live_membership", "none"].includes(access.verification)) {
+        throw new Error(`database_update_route_verification_invalid:${index}`);
+      }
+      if (access.botOwnerBypass != null && typeof access.botOwnerBypass !== "boolean") {
+        throw new Error(`database_update_route_bypass_invalid:${index}`);
+      }
+      if (route.when != null && (!route.when || typeof route.when !== "object" || Array.isArray(route.when)
+        || typeof route.when.path !== "string" || !/^[A-Za-z0-9_.]+$/.test(route.when.path))) {
+        throw new Error(`database_update_route_condition_invalid:${index}`);
+      }
+      for (const [actionIndex, action] of route.actions.entries()) {
+        if (!action || typeof action !== "object" || Array.isArray(action) || !DATABASE_ACTION_TYPES.has(String(action.type || ""))) {
+          throw new Error(`database_update_route_action_invalid:${index}:${actionIndex}`);
+        }
+        if (action.type === "telegram" && (!/^[A-Za-z][A-Za-z0-9]{1,63}$/.test(String(action.method || ""))
+          || !action.payload || typeof action.payload !== "object" || Array.isArray(action.payload))) {
+          throw new Error(`database_update_route_telegram_action_invalid:${index}:${actionIndex}`);
         }
       }
     }
@@ -1255,6 +1363,7 @@ function defaultState() {
     reportQueue: [],
     broadcastDraft: null,
     broadcastQueue: null,
+    ownerComposer: null,
     migrationVersion: 5,
     migrationStatus: { version: 5, status: "pending" },
     pvUsers: {},
@@ -1314,10 +1423,10 @@ function mergeState(value) {
     groups: value.groups && typeof value.groups === "object" && !Array.isArray(value.groups) ? value.groups : {},
     groupUsage: value.groupUsage && typeof value.groupUsage === "object" && !Array.isArray(value.groupUsage) ? value.groupUsage : {},
     targetPolicies: value.targetPolicies && typeof value.targetPolicies === "object" && !Array.isArray(value.targetPolicies)
-      ? Object.fromEntries(Object.entries(value.targetPolicies).filter(([id, item]) => isTelegramId(id) && item && typeof item === "object" && !Array.isArray(item)).slice(-1_000)) : {},
+      ? Object.fromEntries(Object.entries(value.targetPolicies).filter(([id, item]) => isTelegramId(id) && item && typeof item === "object" && !Array.isArray(item)).slice(-10_000)) : {},
     targetUsage: value.targetUsage && typeof value.targetUsage === "object" && !Array.isArray(value.targetUsage)
       ? Object.fromEntries(Object.entries(value.targetUsage).filter(([id, item]) => isTelegramId(id) && item && typeof item === "object" && !Array.isArray(item)
-        && /^\d{4}-\d{2}$/.test(String(item.month || "")) && Number.isFinite(Number(item.used)) && Number(item.used) >= 0).slice(-1_000)) : {},
+        && /^\d{4}-\d{2}$/.test(String(item.month || "")) && Number.isFinite(Number(item.used)) && Number(item.used) >= 0).slice(-10_000)) : {},
     groupModuleOverrides: value.groupModuleOverrides && typeof value.groupModuleOverrides === "object" && !Array.isArray(value.groupModuleOverrides)
       ? Object.fromEntries(Object.entries(value.groupModuleOverrides).slice(-500).map(([chatId, flags]) => [chatId, flags && typeof flags === "object" && !Array.isArray(flags)
         ? Object.fromEntries(Object.entries(flags).filter(([id, enabled]) => getFeatureModule(id) && typeof enabled === "boolean")) : {}])) : {},
@@ -1334,7 +1443,7 @@ function mergeState(value) {
       }])) : {},
     blockedGroups: Array.isArray(value.blockedGroups) ? [...new Set(value.blockedGroups.map(String).filter((id) => /^-?\d{1,20}$/.test(id)))].slice(-2_000) : [],
     leftGroups: Array.isArray(value.leftGroups) ? [...new Set(value.leftGroups.map(String).filter((id) => /^-?\d{1,20}$/.test(id)))].slice(-2_000) : [],
-    channels: Array.isArray(value.channels) ? value.channels.slice(0, 300) : [],
+    channels: Array.isArray(value.channels) ? value.channels.filter((item) => item && isTelegramId(String(item.id || ""))).slice(0, 5_000) : [],
     admins: {
       global: Array.isArray(value.admins?.global) ? [...new Set(value.admins.global.map(String).filter((id) => /^\d{1,20}$/.test(id)))].slice(0, 500) : [],
       byChat: value.admins?.byChat && typeof value.admins.byChat === "object" && !Array.isArray(value.admins.byChat) ? value.admins.byChat : {},
@@ -1345,6 +1454,11 @@ function mergeState(value) {
     reportQueue: Array.isArray(value.reportQueue) ? value.reportQueue.slice(-100) : [],
     broadcastDraft: value.broadcastDraft && typeof value.broadcastDraft === "object" ? value.broadcastDraft : null,
     broadcastQueue: value.broadcastQueue && typeof value.broadcastQueue === "object" ? value.broadcastQueue : null,
+    ownerComposer: value.ownerComposer && typeof value.ownerComposer === "object"
+      && ["target_message", "broadcast"].includes(String(value.ownerComposer.mode || ""))
+      && ["awaiting_message", "confirm"].includes(String(value.ownerComposer.stage || ""))
+      && /^\d{1,20}$/.test(String(value.ownerComposer.ownerId || ""))
+      ? value.ownerComposer : null,
     updateIds: Array.isArray(value.updateIds) ? value.updateIds.filter((id) => Number.isSafeInteger(id) && id >= 0).slice(-4_096) : [],
     resourceRegistry: value.resourceRegistry && typeof value.resourceRegistry === "object" && !Array.isArray(value.resourceRegistry) ? value.resourceRegistry : {},
     pendingResourceCleanup: Array.isArray(value.pendingResourceCleanup) ? [...new Set(value.pendingResourceCleanup.filter((id) => typeof id === "string" && /^[a-z][a-z0-9_-]{1,47}$/.test(id)))].slice(0, 96) : [],
@@ -2523,10 +2637,20 @@ class ForwardSchedulerRuntime {
       link: chat.username ? `https://t.me/${chat.username}` : (old.link || null),
       botStatus: botMember?.status || old.botStatus || "unknown",
       rights,
+      permissions: chat.permissions && typeof chat.permissions === "object" ? chat.permissions : (old.permissions || null),
       rightsCheckedAt: botMember ? Date.now() : Number(old.rightsCheckedAt || 0),
+      description: asText(chat.description || old.description || "").slice(0, 2_000),
       lastMemberCount: Number.isInteger(old.lastMemberCount) ? old.lastMemberCount : null,
-      inviteLink: old.inviteLinkValid ? old.inviteLink : null,
+      lastMemberCountAt: Number(old.lastMemberCountAt || 0) || null,
+      inviteLink: old.inviteLinkValid ? old.inviteLink : (chat.invite_link || old.inviteLink || null),
       inviteLinkValid: old.inviteLinkValid === true,
+      isForum: chat.is_forum ?? old.isForum ?? false,
+      isProtected: chat.has_protected_content ?? old.isProtected ?? false,
+      slowModeDelaySeconds: Number(chat.slow_mode_delay ?? old.slowModeDelaySeconds ?? 0),
+      linkedChatId: chat.linked_chat_id ?? old.linkedChatId ?? null,
+      lastPostId: Number(old.lastPostId || 0) || null,
+      lastPostAt: Number(old.lastPostAt || 0) || null,
+      detailsCheckedAt: Number(old.detailsCheckedAt || 0) || null,
       lastSeenAt: Date.now(),
       joinedAt: old.joinedAt || (botMember && !["left", "kicked"].includes(botMember.status) ? Date.now() : null),
     };
@@ -2546,10 +2670,11 @@ class ForwardSchedulerRuntime {
     if (chat?.type !== "channel" || !chat.id) return;
     const id = String(chat.id);
     const old = state.channels.find((item) => String(item.id) === id) || {};
-    if (!botMember || !Object.hasOwn(botMember, "status")) {
+    if ((!botMember || !Object.hasOwn(botMember, "status"))
+      && Date.now() - Number(old.rightsCheckedAt || 0) > 600_000) {
       const me = await this.#telegram(state, "getMe", {}, { bypassLocalRate: true });
       if (me.ok && me.result?.id) {
-        const membership = await this.#telegram(state, "getChatMember", { chat_id: id, user_id: me.result.id }, { bypassLocalRate: true });
+        const membership = await this.#telegram(state, "getChatMember", { chat_id: id, user_id: me.result.id }, { bypassLocalRate: true, noCache: true });
         if (membership.ok) botMember = membership.result;
       }
     }
@@ -2558,10 +2683,21 @@ class ForwardSchedulerRuntime {
     for (const key of rawPermissions) permissions[key] = botMember && Object.hasOwn(botMember, key) ? botMember[key] === true : null;
     const username = chat.username || old.username || null;
     const record = {
+      ...old,
       id, title: asText(chat.title || old.title || id).slice(0, 180), username,
-      link: username ? `https://t.me/${username}` : null,
+      link: username ? `https://t.me/${username}` : (old.link || null),
       type: "channel", botStatus: botMember?.status || old.botStatus || "Unknown",
-      permissions, rightsCheckedAt: botMember ? Date.now() : Number(old.rightsCheckedAt || 0),
+      permissions: botMember ? permissions : (old.permissions || permissions),
+      rightsCheckedAt: botMember ? Date.now() : Number(old.rightsCheckedAt || 0),
+      description: asText(chat.description || old.description || "").slice(0, 2_000),
+      inviteLink: chat.invite_link || old.inviteLink || null,
+      lastMemberCount: Number.isInteger(old.lastMemberCount) ? old.lastMemberCount : null,
+      lastMemberCountAt: Number(old.lastMemberCountAt || 0) || null,
+      isProtected: chat.has_protected_content ?? old.isProtected ?? false,
+      linkedChatId: chat.linked_chat_id ?? old.linkedChatId ?? null,
+      lastPostId: Number(old.lastPostId || 0) || null,
+      lastPostAt: Number(old.lastPostAt || 0) || null,
+      detailsCheckedAt: Number(old.detailsCheckedAt || 0) || null,
       lastSeenAt: Date.now(),
     };
     const index = state.channels.findIndex((item) => String(item.id) === id);
@@ -2702,12 +2838,217 @@ class ForwardSchedulerRuntime {
     }
   }
 
+  async #beginOwnerComposer(state, message, mode, targetId = "") {
+    if (!isPrivate(message.chat) || !this.#isOwner(message.from?.id, state)) return false;
+    if (!["target_message", "broadcast"].includes(mode)) return false;
+    if (mode === "target_message" && (!isTelegramId(targetId) || !this.#targetRecord(state, targetId))) {
+      await this.#send(message.chat.id, "مقصد انتخاب‌شده پیدا نشد. فهرست را تازه‌سازی کن.", state);
+      return false;
+    }
+    if (mode === "broadcast" && state.broadcastQueue) {
+      await this.#send(message.chat.id, "یک پیام همگانی در حال ارسال است. تا پایان صف، پیام همگانی جدید شروع نمی‌شود.", state);
+      return false;
+    }
+    const existing = state.ownerComposer;
+    if (existing && Number(existing.expiresAt || 0) > Date.now()) {
+      await this.#send(message.chat.id, "یک عملیات ارسال باز است. ابتدا /cancel بفرست یا پیام جدید را جایگزین پیش‌نویس قبلی کن.", state);
+    }
+    state.ownerComposer = {
+      mode,
+      stage: "awaiting_message",
+      ownerId: String(message.from.id),
+      ownerChatId: String(message.chat.id),
+      targetId: mode === "target_message" ? String(targetId) : null,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 15 * 60_000,
+    };
+    await this.#save(state);
+    const target = mode === "target_message" ? this.#targetRecord(state, targetId) : null;
+    const prompt = mode === "target_message"
+      ? `پیام اختصاصی برای <b>${escapeHtml(target?.title || targetId)}</b>\nشناسه: <code>${escapeHtml(targetId)}</code>\n\nپیام موردنظر را ارسال کن. متن، عکس، ویدئو، فایل، ویس و سایر پیام‌های قابل کپی پشتیبانی می‌شوند. سپس پیش‌نمایش تأیید می‌آید. برای انصراف /cancel را بفرست.`
+      : "پیام همگانی\n\nپیام موردنظر را ارسال کن. پس از آن، تعداد مقصدهای ثبت‌شده و دکمه تأیید نمایش داده می‌شود. برای انصراف /cancel را بفرست.";
+    await this.#send(message.chat.id, prompt, state, { parse_mode: "HTML" });
+    return true;
+  }
+
+  async #handleOwnerComposerMessage(state, message) {
+    const draft = state.ownerComposer;
+    if (!draft || !isPrivate(message.chat) || !this.#isOwner(message.from?.id, state)
+      || String(draft.ownerId) !== String(message.from.id)
+      || String(draft.ownerChatId) !== String(message.chat.id)) return false;
+    if (Number(draft.expiresAt || 0) <= Date.now()) {
+      state.ownerComposer = null;
+      await this.#save(state);
+      await this.#send(message.chat.id, "مهلت پیش‌نویس تمام شد. عملیات لغو شد.", state);
+      return true;
+    }
+    const parsed = parseCommand(message.text || "");
+    if (parsed?.command === "/cancel") {
+      state.ownerComposer = null;
+      await this.#save(state);
+      await this.#send(message.chat.id, "عملیات ارسال لغو شد.", state);
+      return true;
+    }
+    if (!Number.isSafeInteger(Number(message.message_id)) || Number(message.message_id) < 1) {
+      await this.#send(message.chat.id, "این نوع پیام قابل استفاده نیست. یک پیام معمولی دیگر ارسال کن.", state);
+      return true;
+    }
+    const serviceKeys = ["new_chat_members", "left_chat_member", "new_chat_title", "new_chat_photo", "delete_chat_photo", "group_chat_created", "supergroup_chat_created", "channel_chat_created", "pinned_message", "forum_topic_created", "forum_topic_closed", "forum_topic_reopened", "video_chat_started", "video_chat_ended", "write_access_allowed"];
+    if (serviceKeys.some((key) => message[key] != null)) {
+      await this.#send(message.chat.id, "پیام‌های سرویس تلگرام قابل ارسال نیستند. یک پیام متنی یا رسانه‌ای معمولی بفرست.", state);
+      return true;
+    }
+    const mediaKeys = ["photo", "video", "animation", "audio", "document", "voice", "video_note", "sticker", "contact", "location", "venue", "poll", "dice", "game", "paid_media"];
+    const hasMedia = mediaKeys.some((key) => message[key] != null);
+    const text = String(message.text || message.caption || "").slice(0, 4_096);
+    if (!hasMedia && !text) {
+      await this.#send(message.chat.id, "پیام خالی قابل ارسال نیست. یک متن یا رسانه بفرست.", state);
+      return true;
+    }
+    draft.stage = "confirm";
+    draft.sourceChatId = String(message.chat.id);
+    draft.sourceMessageId = Number(message.message_id);
+    draft.hasMedia = hasMedia;
+    draft.fallbackText = text;
+    draft.fallbackEntities = Array.isArray(message.entities) ? message.entities.slice(0, 100)
+      : Array.isArray(message.caption_entities) ? message.caption_entities.slice(0, 100) : [];
+    draft.contentKind = hasMedia ? mediaKeys.find((key) => message[key] != null) || "media" : "text";
+    draft.expiresAt = Date.now() + 15 * 60_000;
+    await this.#save(state);
+    let summary;
+    let keyboard;
+    if (draft.mode === "target_message") {
+      const target = this.#targetRecord(state, draft.targetId);
+      summary = `پیش‌نمایش ارسال اختصاصی\nمقصد: <b>${escapeHtml(target?.title || draft.targetId)}</b>\nشناسه: <code>${escapeHtml(draft.targetId)}</code>\nنوع پیام: ${escapeHtml(draft.contentKind)}${text ? `\n\n${escapeHtml(text.slice(0, 1_200))}` : ""}`;
+      keyboard = [[button("✅ تأیید ارسال", "owneradmin:send-confirm", "success"), button("لغو", "owneradmin:compose-cancel", "danger")]];
+    } else {
+      const ids = [...new Set([...Object.keys(state.groups || {}), ...(state.channels || []).map((item) => String(item.id))])].filter(isTelegramId);
+      const eligible = ids.filter((id) => this.#broadcastTargetDecision(state, id).allowed).length;
+      summary = `پیش‌نمایش پیام همگانی\nمقصدهای ثبت‌شده: <b>${ids.length}</b>\nمقصدهای واجد شرایط فعلی: <b>${eligible}</b>\nپیام: ${escapeHtml(draft.contentKind)}${text ? `\n\n${escapeHtml(text.slice(0, 1_200))}` : ""}\n\nارسال با فاصله زمانی و صف Durable Object انجام می‌شود.`;
+      keyboard = [[button("✅ شروع پیام همگانی", "owneradmin:broadcast-confirm", "success"), button("لغو", "owneradmin:compose-cancel", "danger")]];
+    }
+    await this.#send(message.chat.id, summary, state, { parse_mode: "HTML", reply_markup: { inline_keyboard: keyboard } });
+    return true;
+  }
+
+  async #ownerCopyMessage(state, draft, targetId) {
+    const copy = await this.#telegram(state, "copyMessage", {
+      chat_id: Number(targetId),
+      from_chat_id: Number(draft.sourceChatId),
+      message_id: Number(draft.sourceMessageId),
+    }, { group: true, minIntervalMs: clampNumber(this.#db(state)?.limits?.ownerSendIntervalMs, 1_000, 1_000, 4_000) });
+    if (copy.ok || copy.error_code === 429 || copy.description === "LOCAL_ANTI_SPAM_RATE_LIMIT" || draft.hasMedia || !draft.fallbackText) return copy;
+    return this.#telegram(state, "sendMessage", {
+      chat_id: Number(targetId),
+      text: draft.fallbackText,
+      ...(Array.isArray(draft.fallbackEntities) && draft.fallbackEntities.length ? { entities: draft.fallbackEntities } : {}),
+      link_preview_options: { is_disabled: true },
+    }, { group: true, minIntervalMs: clampNumber(this.#db(state)?.limits?.ownerSendIntervalMs, 1_000, 1_000, 4_000) });
+  }
+
+  async #confirmOwnerTargetMessage(state, callback) {
+    const draft = state.ownerComposer;
+    const ownerChatId = callback.message?.chat?.id;
+    if (!draft || draft.mode !== "target_message" || draft.stage !== "confirm"
+      || String(draft.ownerId) !== String(callback.from?.id)
+      || String(draft.ownerChatId) !== String(ownerChatId)
+      || Number(draft.expiresAt || 0) <= Date.now()) {
+      await this.#send(ownerChatId || this.#ownerId(state), "پیش‌نویس ارسال وجود ندارد یا منقضی شده است.", state, {}, { bypassLocalRate: true });
+      return;
+    }
+    const targetId = String(draft.targetId || "");
+    const target = this.#targetRecord(state, targetId);
+    if (!target) {
+      await this.#send(ownerChatId, "مقصد دیگر در فهرست نیست.", state, {}, { bypassLocalRate: true });
+      state.ownerComposer = null;
+      await this.#save(state);
+      return;
+    }
+    if (state.blockedGroups.includes(targetId) || state.leftGroups.includes(targetId)
+      || ["left", "kicked"].includes(String(target.botStatus || "").toLowerCase())) {
+      await this.#send(ownerChatId, "ربات در این مقصد عضو نیست. وضعیت عضویت مقصد را تازه‌سازی کن.", state, {}, { bypassLocalRate: true });
+      return;
+    }
+    const result = await this.#ownerCopyMessage(state, draft, targetId);
+    if (result.ok) {
+      state.ownerComposer = null;
+      await this.#save(state);
+      await this.#send(ownerChatId, `✅ پیام با موفقیت به <b>${escapeHtml(target.title || targetId)}</b> ارسال شد.`, state, { parse_mode: "HTML" }, { bypassLocalRate: true });
+      return;
+    }
+    const reason = asText(result.description || result.error_code || "خطای نامشخص").slice(0, 220);
+    await this.#send(ownerChatId, `❌ ارسال انجام نشد.\nمقصد: <code>${escapeHtml(targetId)}</code>\nخطا: ${escapeHtml(reason)}\n\nمی‌توانی پس از رفع مشکل دوباره تأیید کنی یا لغو کنی.`, state, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: [[button("تلاش دوباره", "owneradmin:send-confirm", "success"), button("لغو", "owneradmin:compose-cancel", "danger")]] },
+    }, { bypassLocalRate: true });
+  }
+
+  async #confirmOwnerBroadcast(state, callback) {
+    const draft = state.ownerComposer;
+    const ownerChatId = callback.message?.chat?.id;
+    if (!draft || draft.mode !== "broadcast" || draft.stage !== "confirm"
+      || String(draft.ownerId) !== String(callback.from?.id)
+      || String(draft.ownerChatId) !== String(ownerChatId)
+      || Number(draft.expiresAt || 0) <= Date.now()) {
+      await this.#send(ownerChatId || this.#ownerId(state), "پیش‌نویس پیام همگانی وجود ندارد یا منقضی شده است.", state, {}, { bypassLocalRate: true });
+      return;
+    }
+    if (this.#db(state)?.ownerBroadcast?.enabled === false) {
+      await this.#send(ownerChatId, "پیام همگانی در دیتابیس غیرفعال است.", state, {}, { bypassLocalRate: true });
+      return;
+    }
+    if (state.broadcastQueue) {
+      await this.#send(ownerChatId, "یک صف پیام همگانی در حال اجراست.", state, {}, { bypassLocalRate: true });
+      return;
+    }
+    const maxTargets = clampNumber(this.#db(state)?.limits?.maxBroadcastTargets, 10_000, 1, 10_000);
+    const chatIds = [...new Set([
+      ...Object.keys(state.groups || {}),
+      ...(state.channels || []).map((item) => String(item.id)),
+    ])].filter(isTelegramId).slice(0, maxTargets);
+    if (!chatIds.length) {
+      await this.#send(ownerChatId, "هیچ مقصد ثبت‌شده‌ای وجود ندارد.", state, {}, { bypassLocalRate: true });
+      return;
+    }
+    const eligibleNow = chatIds.reduce((count, id) => count + (this.#broadcastTargetDecision(state, id).allowed ? 1 : 0), 0);
+    if (eligibleNow < 1) {
+      await this.#send(ownerChatId,
+        `هیچ مقصد واجد شرایطی برای پیام همگانی وجود ندارد.\nمقصدهای ثبت‌شده: ${chatIds.length}\nوضعیت عضویت ربات، فعال‌بودن مقصد و سهمیه ماهانه را بررسی کن.`,
+        state, {}, { bypassLocalRate: true });
+      return;
+    }
+    state.broadcastQueue = {
+      ownerId: String(callback.from.id),
+      sourceChatId: String(draft.sourceChatId),
+      sourceMessageId: Number(draft.sourceMessageId),
+      copyOriginalMessage: true,
+      hasMedia: Boolean(draft.hasMedia),
+      text: draft.fallbackText || "",
+      fallbackEntities: Array.isArray(draft.fallbackEntities) ? draft.fallbackEntities.slice(0, 100) : [],
+      chatIds,
+      index: 0,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      nextAt: Date.now() + 500,
+      createdAt: Date.now(),
+      lastError: null,
+    };
+    state.ownerComposer = null;
+    await this.#save(state);
+    await this.ctx.storage.setAlarm(state.broadcastQueue.nextAt);
+    await this.#send(ownerChatId,
+      `🚀 صف پیام همگانی شروع شد.\nمقصدهای ثبت‌شده: ${chatIds.length}\nواجد شرایط در شروع: ${eligibleNow}\nارسال‌ها با فاصله ایمن انجام می‌شوند. پس از پایان، گزارش کامل ارسال می‌شود.`,
+      state, {}, { bypassLocalRate: true });
+  }
+
   async #handlePrivateMessage(state, message) {
     const user = message.from || {};
     const chat = message.chat || {};
     if (!isPrivate(chat) || !this.#isOwner(user.id, state)) return;
 
     const text = asText(message.text || message.caption);
+    if (await this.#handleOwnerComposerMessage(state, message)) return;
     const parsed = parseCommand(text);
     const ownerCommand = configuredCommand(this.#ownerPanelConfig(state).slashCommand || `/${this.#ownerPanelConfig(state).command || "admin"}`);
     if (parsed && this.#ownerPanelConfig(state).enabled !== false && parsed.command === ownerCommand) {
@@ -3499,10 +3840,10 @@ class ForwardSchedulerRuntime {
     const scope = String(policy.scope || "group_or_supergroup");
     if (scope === "private" && !isPrivate(chat)) return { allowed: false, reason: "scope" };
     if (scope === "group_or_supergroup" && !isGroup(chat)) return { allowed: false, reason: "scope" };
-    if (!actorId) return { allowed: false, reason: "actor" };
 
     const role = String(policy.requiredRole || "member");
     if (role === "any") return { allowed: true, policy };
+    if (!actorId) return { allowed: false, reason: "actor" };
     if (role === "owner") return { allowed: this.#isOwner(actorId, state) && isPrivate(chat), policy };
     if (role === "member") return { allowed: isGroup(chat) && !message.from?.is_bot, policy };
     if (role === "creator_or_administrator" || role === "administrator" || role === "creator") {
@@ -3562,6 +3903,8 @@ class ForwardSchedulerRuntime {
         messageId: extraContext.callback.messageId || null,
       } : null,
       target: extraContext.target || null,
+      update: extraContext.update || null,
+      updateType: extraContext.updateType || "",
       result: null,
     };
     for (const action of actions.slice(0, maxActions)) {
@@ -3574,6 +3917,9 @@ class ForwardSchedulerRuntime {
         if (when.truthy === false && actual) continue;
       }
       const type = String(action.type || "");
+      const moduleEntry = Object.entries(RUNTIME_MODULE_REGISTRY).find(([, module]) => module.actions.includes(type));
+      if (!moduleEntry) throw new Error(`database_action_unregistered:${type || "empty"}`);
+      context.module = moduleEntry[0];
       const renderedText = String(this.#resolveActionValue(action.text || "", context) || "");
       if (type === "reply") {
         if (renderedText) await this.#reply(message, renderedText, state);
@@ -3631,6 +3977,17 @@ class ForwardSchedulerRuntime {
         const note = String(this.#resolveActionValue(action.note || "", context) || "");
         const messageId = extraContext.callback?.messageId || null;
         await this.#sendOwnerPanel(state, message.chat.id, view, targetId, page, messageId, note);
+      } else if (type === "owner_target_message_compose" || type === "owner_broadcast_compose") {
+        if (!isPrivate(message.chat) || !this.#isOwner(message.from?.id, state)) throw new Error("database_action_owner_required");
+        const targetId = type === "owner_target_message_compose"
+          ? String(this.#resolveActionValue(action.targetId ?? "{{callback.args.0}}", context) || "") : "";
+        await this.#beginOwnerComposer(state, message, type === "owner_target_message_compose" ? "target_message" : "broadcast", targetId);
+      } else if (type === "owner_panel_refresh_target") {
+        if (!isPrivate(message.chat) || !this.#isOwner(message.from?.id, state)) throw new Error("database_action_owner_required");
+        const targetId = String(this.#resolveActionValue(action.targetId ?? "{{callback.args.0}}", context) || "");
+        if (!isTelegramId(targetId) || !this.#targetRecord(state, targetId)) throw new Error("database_action_target_missing");
+        await this.#refreshTargetRecord(state, targetId, true);
+        await this.#sendOwnerPanel(state, message.chat.id, "target", targetId, 0, extraContext.callback?.messageId || null, "اطلاعات مقصد تازه‌سازی شد.");
       } else if (type === "resource_set") {
         const key = String(this.#resolveActionValue(action.key, context) || "");
         const value = this.#resolveActionValue(action.value, context);
@@ -3683,6 +4040,55 @@ class ForwardSchedulerRuntime {
     return { tier, quota, used: usage.used, remaining, month: usage.month, active };
   }
 
+  async #refreshTargetRecord(state, targetId, force = false) {
+    const id = String(targetId);
+    const current = this.#targetRecord(state, id);
+    if (!current) return null;
+    const interval = clampNumber(this.#ownerPanelConfig(state).refreshIntervalSeconds, 300, 30, 3_600) * 1_000;
+    if (!force && Date.now() - Number(current.detailsCheckedAt || 0) < interval) return current;
+    const chatResult = await this.#telegram(state, "getChat", { chat_id: Number(id) }, { bypassLocalRate: true, noCache: true });
+    if (!chatResult.ok || !chatResult.result) {
+      if (current.targetType === "group") state.groups[id].detailsCheckedAt = Date.now();
+      else {
+        const index = state.channels.findIndex((item) => String(item.id) === id);
+        if (index >= 0) state.channels[index].detailsCheckedAt = Date.now();
+      }
+      await this.#save(state);
+      return this.#targetRecord(state, id);
+    }
+    const chat = chatResult.result;
+    const me = await this.#telegram(state, "getMe", {}, { bypassLocalRate: true });
+    let membership = null;
+    if (me.ok && me.result?.id) {
+      const memberResult = await this.#telegram(state, "getChatMember", { chat_id: Number(id), user_id: me.result.id }, { bypassLocalRate: true, noCache: true });
+      if (memberResult.ok) membership = memberResult.result;
+    }
+    const count = await this.#telegram(state, "getChatMemberCount", { chat_id: Number(id) }, { bypassLocalRate: true, noCache: true });
+    if (isGroup(chat)) {
+      await this.#trackGroup(state, chat, membership);
+      const record = state.groups[id];
+      if (record) {
+        if (count.ok && Number.isInteger(count.result)) {
+          record.lastMemberCount = count.result;
+          record.lastMemberCountAt = Date.now();
+        }
+        record.detailsCheckedAt = Date.now();
+      }
+    } else if (chat.type === "channel") {
+      await this.#trackChannel(state, chat, membership);
+      const record = state.channels.find((item) => String(item.id) === id);
+      if (record) {
+        if (count.ok && Number.isInteger(count.result)) {
+          record.lastMemberCount = count.result;
+          record.lastMemberCountAt = Date.now();
+        }
+        record.detailsCheckedAt = Date.now();
+      }
+    }
+    await this.#save(state);
+    return this.#targetRecord(state, id);
+  }
+
   async #sendOwnerPanel(state, chatId, view = "home", targetId = "", page = 0, messageId = null, note = "") {
     const db = this.#db(state) || {};
     const config = this.#ownerPanelConfig(state);
@@ -3692,6 +4098,7 @@ class ForwardSchedulerRuntime {
     let text = "";
     let keyboard = [];
     if (view === "target") {
+      await this.#refreshTargetRecord(state, targetId, false);
       const record = this.#targetRecord(state, targetId);
       if (!record) return this.#sendOwnerPanel(state, chatId, "home", "", 0, messageId, "مقصد پیدا نشد.");
       const policy = state.targetPolicies?.[String(targetId)] || {};
@@ -3700,18 +4107,7 @@ class ForwardSchedulerRuntime {
         && !["left", "kicked"].includes(String(record.botStatus || "").toLowerCase());
       const permissions = record.rights || record.permissions || {};
       const permissionLines = Object.entries(permissions).map(([key, value]) => `• ${escapeHtml(key)}: ${value === true ? "✅" : value === false ? "❌" : "نامشخص"}`).join("\n");
-      let link = record.link || record.inviteLink || "";
-      if (!link && this.#targetType(state, targetId) === "group") {
-        const details = await this.#telegram(state, "getChat", { chat_id: Number(targetId) }, { bypassLocalRate: true, noCache: true });
-        if (details.ok) {
-          link = details.result?.invite_link || (details.result?.username ? `https://t.me/${details.result.username}` : "");
-          if (link) {
-            state.groups[String(targetId)].inviteLink = details.result?.invite_link || null;
-            state.groups[String(targetId)].link = details.result?.username ? `https://t.me/${details.result.username}` : state.groups[String(targetId)].link;
-            await this.#save(state);
-          }
-        }
-      }
+      const link = record.link || record.inviteLink || "";
       const labels = config.labels || {};
       const label = (key, fallback) => escapeHtml(labels[key] || fallback || key);
       const valueMap = {
@@ -3730,6 +4126,14 @@ class ForwardSchedulerRuntime {
         rights: permissionLines || "ثبت نشده",
         permissions: permissionLines || "ثبت نشده",
         lastMemberCount: record.lastMemberCount == null ? "نامشخص" : Number(record.lastMemberCount).toLocaleString("fa-IR"),
+        memberCountAt: record.lastMemberCountAt ? new Date(Number(record.lastMemberCountAt)).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" }) : "نامشخص",
+        description: escapeHtml(record.description || "ثبت نشده"),
+        isForum: record.isForum ? "بله" : "خیر",
+        isProtected: record.isProtected ? "بله" : "خیر",
+        slowModeDelay: Number(record.slowModeDelaySeconds || 0).toLocaleString("fa-IR") + " ثانیه",
+        linkedChatId: record.linkedChatId ? `<code>${escapeHtml(record.linkedChatId)}</code>` : "ندارد",
+        lastPostId: record.lastPostId ? `<code>${escapeHtml(record.lastPostId)}</code>` : "ثبت نشده",
+        lastPostAt: record.lastPostAt ? new Date(Number(record.lastPostAt)).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" }) : "ثبت نشده",
         lastSeenAt: record.lastSeenAt ? new Date(Number(record.lastSeenAt)).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" }) : "نامشخص",
         inviteLink: record.inviteLink ? `<a href="${escapeHtml(record.inviteLink)}">باز کردن لینک دعوت</a>` : "ثبت نشده",
       };
@@ -3903,6 +4307,23 @@ class ForwardSchedulerRuntime {
     const payload = data.startsWith("owneradmin:") ? data.slice("owneradmin:".length).split(":") : [];
     const [action, first, second, third] = payload;
     const chatId = callback.message.chat.id;
+    if (action === "compose-cancel") {
+      const draft = state.ownerComposer;
+      if (draft && String(draft.ownerId) === String(callback.from?.id)) {
+        state.ownerComposer = null;
+        await this.#save(state);
+      }
+      await this.#send(chatId, "عملیات ارسال لغو شد.", state, {}, { bypassLocalRate: true });
+      return;
+    }
+    if (action === "send-confirm") {
+      await this.#confirmOwnerTargetMessage(state, callback);
+      return;
+    }
+    if (action === "broadcast-confirm") {
+      await this.#confirmOwnerBroadcast(state, callback);
+      return;
+    }
     if (action === "home") {
       await this.#sendOwnerPanel(state, chatId, "home", "", 0, callback.message.message_id);
       return;
@@ -3995,6 +4416,95 @@ class ForwardSchedulerRuntime {
       return;
     }
     await this.#answerCallback(callback.id, "درخواست نامعتبر یا منقضی شده است.");
+  }
+
+  async #handleDatabaseUpdateRoutes(state, update) {
+    const database = this.#db(state) || {};
+    const updateType = getTelegramUpdateType(update);
+    if (updateType === "callback_query") return 0;
+    const routes = Array.isArray(database.updateRoutes) ? database.updateRoutes : [];
+    if (!routes.length) return 0;
+
+    const source = update?.[updateType] && typeof update[updateType] === "object" ? update[updateType] : {};
+    const messageSource = source?.message && typeof source.message === "object" ? source.message : source;
+    const actor = messageSource.from || source.from || source.new_chat_member?.user || source.old_chat_member?.user || {};
+    const chat = messageSource.chat || source.chat || (actor.id ? { id: actor.id, type: "private" } : {});
+    const syntheticMessage = {
+      ...messageSource,
+      from: actor,
+      chat,
+      message_id: Number(messageSource.message_id || source.message_id || 0),
+      text: String(messageSource.text || messageSource.caption || ""),
+    };
+    let executed = 0;
+    for (const route of routes) {
+      if (!route || route.enabled === false || String(route.updateType) !== updateType) continue;
+      if (route.when && typeof route.when === "object") {
+        const actual = getPath(update, String(route.when.path || ""), null);
+        if (Object.hasOwn(route.when, "equals") && String(actual) !== String(route.when.equals)) continue;
+        if (Object.hasOwn(route.when, "notEquals") && String(actual) === String(route.when.notEquals)) continue;
+        if (route.when.truthy === true && !actual) continue;
+        if (route.when.truthy === false && actual) continue;
+      }
+      const routeAccess = route.access && Object.keys(route.access).length
+        ? route.access : { scope: "private", requiredRole: "owner" };
+      const permission = await this.#authorizeDatabaseCommand(state, syntheticMessage, { access: routeAccess }, database);
+      if (!permission.allowed) continue;
+      try {
+        await this.#executeDatabaseActions(state, syntheticMessage, { actions: route.actions }, "", {
+          update,
+          updateType,
+        });
+        executed += 1;
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: "database_update_route_failed",
+          routeId: String(route.id || ""),
+          updateType,
+          reason: asText(error?.message || error).slice(0, 160),
+        }));
+      }
+    }
+    return executed;
+  }
+
+  async #handleDatabaseCallback(state, callback) {
+    const database = this.#db(state) || {};
+    const data = asText(callback?.data);
+    if (!data || data.length > 64 || !callback?.message?.chat) return false;
+    const routes = Array.isArray(database.callbackRoutes) ? database.callbackRoutes : [];
+    const route = routes.find((item) => {
+      if (!item || item.enabled === false) return false;
+      const prefix = String(item.prefix || "");
+      return item.match === "exact" ? data === prefix : (data === prefix || data.startsWith(`${prefix}:`));
+    });
+    if (!route) return false;
+
+    const prefix = String(route.prefix || "");
+    const suffix = data === prefix ? [] : data.slice(prefix.length + 1).split(":");
+    const message = {
+      from: callback.from || {},
+      chat: callback.message.chat,
+      message_id: callback.message.message_id,
+      text: "",
+    };
+    const routeAccess = route.access && Object.keys(route.access).length
+      ? route.access : { scope: "private", requiredRole: "owner" };
+    const permission = await this.#authorizeDatabaseCommand(state, message, { access: routeAccess }, database);
+    if (!permission.allowed) {
+      await this.#answerCallback(callback.id, "اجازه استفاده از این دکمه را نداری.");
+      return true;
+    }
+    await this.#answerCallback(callback.id, route.answerText ? String(route.answerText).slice(0, 180) : "");
+    await this.#executeDatabaseActions(state, message, { actions: route.actions }, "", {
+      callback: {
+        id: callback.id,
+        data,
+        args: suffix,
+        messageId: callback.message.message_id,
+      },
+    });
+    return true;
   }
 
   async #handleDatabaseCommand(state, message, db) {
@@ -4628,7 +5138,7 @@ class ForwardSchedulerRuntime {
     const updateId = update?.update_id;
     const callback = update?.callback_query;
     const messageForGate = update?.message || update?.edited_message || update?.business_message
-      || update?.edited_business_message || update?.guest_message;
+      || update?.edited_business_message || update?.guest_message || update?.channel_post || update?.edited_channel_post;
     const commandForGate = parseCommand(messageForGate?.text || "");
     const ownerPanelConfig = this.#ownerPanelConfig(state);
     const ownerPanelCommand = configuredCommand(ownerPanelConfig.slashCommand || `/${ownerPanelConfig.command || "admin"}`);
@@ -4638,6 +5148,9 @@ class ForwardSchedulerRuntime {
     const isOwnerSettingsMessage = Boolean(messageForGate && isPrivate(messageForGate.chat)
       && this.#isOwner(messageForGate.from?.id, state)
       && (commandForGate?.command === "/settings" || (state.flow === "database_upload" && messageForGate.document)));
+    const isOwnerComposerMessage = Boolean(messageForGate && isPrivate(messageForGate.chat)
+      && this.#isOwner(messageForGate.from?.id, state)
+      && state.ownerComposer && String(state.ownerComposer.ownerId) === String(messageForGate.from?.id));
     const isOwnerSettingsCallback = Boolean(callback && this.#isOwner(callback.from?.id, state)
       && isPrivate(callback.message?.chat) && String(callback.data || "").startsWith("settings:"));
     const isOwnerPanelCallback = Boolean(callback && this.#isOwner(callback.from?.id, state)
@@ -4653,11 +5166,12 @@ class ForwardSchedulerRuntime {
       ownerSettingsCallback: isOwnerSettingsCallback,
       botEnabled: state.settings?.botEnabled !== false,
     }));
-    if (state.settings?.botEnabled === false && !isOwnerSettingsMessage && !isOwnerSettingsCallback && !isOwnerPanelMessage && !isOwnerPanelCallback) {
+    if (state.settings?.botEnabled === false && !isOwnerSettingsMessage && !isOwnerSettingsCallback && !isOwnerPanelMessage && !isOwnerPanelCallback && !isOwnerComposerMessage) {
       console.log(JSON.stringify({ event: "telegram_update_ignored_bot_disabled", updateId }));
       return;
     }
     await this.#save(state);
+    await this.#handleDatabaseUpdateRoutes(state, update);
 
     if (callback) {
       const callbackData = asText(callback.data);
@@ -4667,6 +5181,8 @@ class ForwardSchedulerRuntime {
       } else if (this.#isOwner(callback.from?.id, state) && isPrivate(callback.message?.chat) && callbackData.startsWith("owneradmin:")) {
         await this.#answerCallback(callback.id);
         await this.#handleOwnerPanelCallback(state, callback);
+      } else if (await this.#handleDatabaseCallback(state, callback)) {
+        // Database-defined callback routes own their permission check and acknowledgement.
       } else if (callbackData.startsWith("help:") || callbackData.startsWith("captcha:") || callbackData.startsWith("group:bot:") || callbackData.startsWith("tag:")
         || callbackData.startsWith("g5:") || callbackData.startsWith("t5:")) {
         await this.#handleCallback(state, callback);
@@ -4742,6 +5258,7 @@ class ForwardSchedulerRuntime {
       const memberUpdate = update.chat_member;
       const chat = memberUpdate.chat || {};
       if (!isGroup(chat)) return;
+      await this.#trackGroup(state, chat);
       const memberUser = memberUpdate.new_chat_member?.user;
       this.#rememberKnownMember(state, chat, memberUser);
       const oldStatus = memberUpdate.old_chat_member?.status;
@@ -4809,9 +5326,10 @@ class ForwardSchedulerRuntime {
       await this.#trackGroup(state, joinRequest.chat);
       await this.#handleJoinRequest(state, joinRequest);
     } else {
-      // channel_post and edited_channel_post are deliberately ignored: no channel response/moderation.
+      // Channel posts are registry events only; group moderation/reply handlers
+      // never run for channel posts. The generic owner/API paths remain separate.
       const message = update?.message || update?.edited_message || update?.business_message
-        || update?.edited_business_message || update?.guest_message;
+        || update?.edited_business_message || update?.guest_message || update?.channel_post || update?.edited_channel_post;
       if (message) {
         const chat = message.chat || {};
         if (isGroup(chat)) {
@@ -4839,6 +5357,15 @@ class ForwardSchedulerRuntime {
           }
         } else if (isPrivate(chat)) {
           await this.#handlePrivateMessage(state, { ...message, update_id: updateId });
+        } else if (chat.type === "channel") {
+          await this.#trackChannel(state, chat);
+          const record = state.channels.find((item) => String(item.id) === String(chat.id));
+          if (record) {
+            record.lastPostId = Number(message.message_id || record.lastPostId || 0) || null;
+            record.lastPostAt = Date.now();
+            record.lastSeenAt = Date.now();
+          }
+          await this.#save(state);
         }
       }
     }
@@ -5079,7 +5606,19 @@ class ForwardSchedulerRuntime {
       return;
     }
     let result;
-    if (queue.hasMedia) {
+    if (queue.copyOriginalMessage === true && queue.sourceMessageId && queue.sourceChatId) {
+      result = await this.#telegram(state, "copyMessage", {
+        chat_id: chatId, from_chat_id: queue.sourceChatId, message_id: queue.sourceMessageId,
+      }, { group: true, minIntervalMs: 3_500 });
+      if (!result.ok && result.error_code !== 429 && result.description !== "LOCAL_ANTI_SPAM_RATE_LIMIT" && !queue.hasMedia && queue.text) {
+        result = await this.#telegram(state, "sendMessage", {
+          chat_id: chatId,
+          text: String(queue.text).slice(0, 4_096),
+          ...(Array.isArray(queue.fallbackEntities) && queue.fallbackEntities.length ? { entities: queue.fallbackEntities.slice(0, 100) } : {}),
+          link_preview_options: { is_disabled: true },
+        }, { group: true, minIntervalMs: 3_500 });
+      }
+    } else if (queue.hasMedia) {
       result = await this.#telegram(state, "copyMessage", {
         chat_id: chatId, from_chat_id: queue.sourceChatId, message_id: queue.sourceMessageId,
       }, { group: true, minIntervalMs: 3_500 });
@@ -5095,7 +5634,9 @@ class ForwardSchedulerRuntime {
     }
     if (result.ok) {
       queue.sent = Number(queue.sent || 0) + 1;
-      state.groupUsage[String(chatId)] = Number(state.groupUsage[String(chatId)] || 0) + 1;
+      if (this.#targetType(state, chatId) === "group") {
+        state.groupUsage[String(chatId)] = Number(state.groupUsage[String(chatId)] || 0) + 1;
+      }
       this.#recordTargetBroadcastUsage(state, chatId);
     } else {
       queue.failed = Number(queue.failed || 0) + 1;
@@ -5215,6 +5756,7 @@ export class ForwardScheduler extends DurableObject {
         autoUpdate: state?.settings?.autoUpdate !== false,
       },
       database: { installed: Boolean(manifest?.hash), bytes: Number(manifest?.bytes || 0), chunks: Number(manifest?.chunks || 0) },
+      modules: Object.fromEntries(Object.entries(RUNTIME_MODULE_REGISTRY).map(([id, module]) => [id, [...module.actions]])),
       nextAlarmAt: Number(alarmAt || 0) || null,
     };
   }

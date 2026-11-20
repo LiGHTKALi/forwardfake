@@ -1,9 +1,9 @@
 {
   "schemaVersion": 5,
-  "version": "5.4.13-config-driven-runtime",
+  "version": "5.4.16-modular-api-runtime",
   "name": "MUNITOS Group Management Database",
   "language": "fa",
-  "description": "پیکربندی متمرکز فرمان‌ها و سطح دسترسی، پنل مالک، سهمیه مقصدها و موتور فرمان‌های مبتنی بر Action DSL.",
+  "description": "مدیریت گروه و کانال، پنل مالک، ارسال اختصاصی و پیام همگانی صف‌بندی‌شده با موتور ماژولار.",
   "runtime": {
     "telegram": {
       "parseMode": "HTML"
@@ -39,7 +39,16 @@
       "owner.chat.registry",
       "owner.chat.plan-management",
       "group.goodbye.templates",
-      "group.goodbye.media"
+      "group.goodbye.media",
+      "owner.target.direct-message",
+      "owner.broadcast.confirmed-queue",
+      "owner.chat.registry.channel-post-discovery",
+      "runtime.module-registry",
+      "runtime.telegram.generic-api-gateway",
+      "runtime.database.callback-router",
+      "runtime.database.update-router",
+      "runtime.database.command-action-dsl",
+      "runtime.database.telegram-api-gateway"
     ],
     "cache": {
       "chatAnswerTtlSeconds": 0
@@ -53,7 +62,7 @@
     "commandEngine": {
       "enabled": true,
       "mode": "declarative-actions",
-      "maxActionsPerCommand": 12,
+      "maxActionsPerCommand": 25,
       "templateSyntax": "{{user.id}} {{chat.id}} {{argsText}} {{message.text}} {{reply.text}} {{result.value}}",
       "supportedActions": [
         "reply",
@@ -65,9 +74,94 @@
         "resource_set",
         "resource_get",
         "target_policy_set",
-        "owner_panel_show"
+        "owner_panel_show",
+        "owner_target_message_compose",
+        "owner_broadcast_compose",
+        "owner_panel_refresh_target"
       ],
-      "note": "فرمان‌های جدیدی که از handlerهای داخلی موجود یا Action DSL استفاده کنند، فقط با database.json قابل تعریف‌اند. اجرای JavaScript آزاد یا eval فعال نیست."
+      "note": "فرمان‌ها و callbackهای جدید با تغییر database.json قابل افزودن هستند. برای متدهای Telegram از action نوع telegram استفاده می‌شود و همه درخواست‌ها از درگاه مرکزی rate-limited عبور می‌کنند. اجرای کد دلخواه JavaScript فعال نیست.",
+      "moduleRegistry": {
+        "core": [
+          "reply",
+          "send_message",
+          "resource_set",
+          "resource_get"
+        ],
+        "telegram": [
+          "telegram"
+        ],
+        "group": [
+          "toggle_feature",
+          "set_group_setting",
+          "delete_group_setting"
+        ],
+        "owner": [
+          "target_policy_set",
+          "owner_panel_show",
+          "owner_target_message_compose",
+          "owner_panel_refresh_target"
+        ],
+        "broadcast": [
+          "owner_broadcast_compose"
+        ]
+      },
+      "extensionContract": {
+        "description": "فرمان‌های تازه را با تعریف commands[].actions در همین database.json اضافه کن. برای متدهای Telegram از action نوع telegram استفاده می‌شود و همه درخواست‌ها از درگاه rate-limited مشترک عبور می‌کنند.",
+        "genericTelegramAction": {
+          "type": "telegram",
+          "method": "sendMessage",
+          "payload": {
+            "chat_id": "{{chat.id}}",
+            "text": "پیام نمونه {{user.first_name}}"
+          }
+        },
+        "availableContext": [
+          "user.*",
+          "chat.*",
+          "message.*",
+          "reply.*",
+          "args",
+          "argsText",
+          "owner.id",
+          "callback.*",
+          "target.*",
+          "result.*"
+        ],
+        "execution": "declarative-action-dsl",
+        "limits": {
+          "maxActionsPerCommand": 25,
+          "maxCommands": 100
+        },
+        "restrictedMethods": [
+          "setWebhook",
+          "deleteWebhook",
+          "getUpdates",
+          "logOut",
+          "close"
+        ],
+        "note": "برای قابلیت‌های قابل بیان با API تلگرام و اکشن‌های فعلی، فقط JSON لازم است. رفتار کاملاً جدید خارج از Action DSL هنوز به توسعه هسته نیاز دارد.",
+        "callbackRoutes": {
+          "field": "callbackRoutes",
+          "prefixExample": "ext:feature",
+          "callbackExample": "ext:feature:123",
+          "defaultAccess": "private_owner_only",
+          "actions": "same as commands[].actions",
+          "note": "برای دکمه‌های جدید، prefix و access و actions را در callbackRoutes تعریف کن؛ Worker مسیر callback را بدون تغییر کد dispatch می‌کند."
+        },
+        "updateRoutes": {
+          "field": "updateRoutes",
+          "supportedEventTypes": "TELEGRAM_UPDATE_TYPES",
+          "when": "optional path/equals/notEquals/truthy condition over the raw Telegram update",
+          "access": "required; defaults to private owner only",
+          "actions": "same as commands[].actions",
+          "note": "برای eventهای جدید، updateType و شرط و عملیات را در دیتابیس تعریف کن. callback_query به‌طور جداگانه از callbackRoutes عبور می‌کند."
+        }
+      },
+      "supportedRoutes": [
+        "commands",
+        "callbackRoutes",
+        "updateRoutes"
+      ]
     }
   },
   "limits": {
@@ -103,8 +197,9 @@
       }
     },
     "broadcastIntervalMs": 3500,
-    "maxRegisteredGroups": 1000,
-    "maxRegisteredChannels": 500
+    "maxRegisteredGroups": 5000,
+    "maxRegisteredChannels": 5000,
+    "maxBroadcastTargets": 10000
   },
   "roles": {
     "adminIds": [],
@@ -974,9 +1069,9 @@
     },
     "defaultTier": "FREE",
     "defaultActive": true,
-    "access": "owner_settings_only",
-    "messageMode": "copy_original",
-    "note": "مدیریت مقصدها، پلن و سهمیه با پنل خصوصی /admin انجام می‌شود. مصرف ماهانه فقط پس از ارسال موفق پیام همگانی شمارش می‌شود.",
+    "access": "owner_private_chat_only",
+    "messageMode": "copy_original_message",
+    "note": "پیام همگانی از /admin شروع می‌شود. مالک یک پیام می‌فرستد، پیش‌نمایش و شمار مقصدها را می‌بیند و سپس صف تأییدشده به‌صورت تدریجی اجرا می‌شود. سهمیه و وضعیت هر مقصد در زمان ارسال بررسی می‌شود.",
     "targetPolicy": {
       "managedTargetTypes": [
         "group",
@@ -990,6 +1085,18 @@
       "perTargetOverride": true,
       "ownerOnlyManagement": true,
       "enforcedByWorker": true
+    },
+    "queue": {
+      "enabled": true,
+      "storage": "durable_object_state",
+      "confirmationRequired": true,
+      "intervalMs": 3500,
+      "retry429": true,
+      "retrySameTargetOnRateLimit": true,
+      "maxTargets": 10000,
+      "sourceMessage": "copyMessage",
+      "textFallback": "sendMessage_with_entities",
+      "reportOnCompletion": true
     }
   },
   "authorization": {
@@ -1043,12 +1150,15 @@
     },
     "implementation": {
       "status": "implemented",
-      "route": "private_owner_command",
+      "route": "private_owner_command_and_callbacks",
       "callbacks": "owneradmin:*",
-      "note": "فهرست گروه‌ها و کانال‌ها، جزئیات، سطح دسترسی ربات، وضعیت ارسال، پلن و سهمیه ماهانه با Worker عمومی اجرا می‌شود."
+      "directSend": "implemented_copy_message_with_confirmation",
+      "broadcast": "implemented_durable_queue_with_confirmation",
+      "registry": "group_messages_chat_member_chat_join_request_my_chat_member_channel_post",
+      "note": "پیام اختصاصی و همگانی در Worker پیاده‌سازی شده‌اند. مقصدهای جدید با رویدادهای قابل دریافت Telegram ثبت می‌شوند؛ Bot API امکان فهرست‌گیری یک‌جای تمام چت‌های قدیمی را ارائه نمی‌کند."
     },
     "title": "مدیریت مرکزی ربات",
-    "intro": "فهرست تمام گروه‌ها و کانال‌های ثبت‌شده و مدیریت دسترسی ارسال همگانی.",
+    "intro": "فهرست مقصدهای شناخته‌شده ربات. برای جزئیات و ارسال اختصاصی روی هر مقصد بزن؛ برای پیام همگانی از دکمه پایین استفاده کن. وضعیت عضویت و دسترسی‌های ربات جداگانه نمایش داده می‌شود.",
     "sections": [
       {
         "id": "groups",
@@ -1072,10 +1182,10 @@
           "isLeft"
         ],
         "usage": {
-          "field": "groupUsage",
-          "label": "تعداد پیام‌های ثبت‌شده",
-          "period": "cumulative",
-          "note": "این شمارنده در Worker فعلی شمارنده ماهانه ارسال همگانی نیست."
+          "field": "targetUsage",
+          "label": "مصرف پیام همگانی",
+          "period": "calendar_month_utc",
+          "note": "عدد مصرف ماه جاری از شمارنده targetUsage خوانده می‌شود؛ groupUsage شمارنده جداگانه و تجمعی است."
         },
         "detailActions": [
           "toggle_send",
@@ -1099,8 +1209,10 @@
           "lastSeenAt"
         ],
         "usage": {
-          "available": false,
-          "note": "Worker فعلی شمارنده مصرف ماهانه جداگانه برای کانال‌ها نگه نمی‌دارد."
+          "field": "targetUsage",
+          "label": "مصرف پیام همگانی",
+          "period": "calendar_month_utc",
+          "note": "مصرف ماه جاری در Worker با شناسه مقصد مشترک برای گروه و کانال نگهداری می‌شود."
         },
         "detailActions": [
           "toggle_send",
@@ -1133,7 +1245,7 @@
       "homeAction": "owneradmin:action:<action_id>"
     },
     "commandDescription": "پنل مدیریت مالک ربات",
-    "pageSize": 8,
+    "pageSize": 12,
     "quotaPresets": [
       0,
       500,
@@ -1149,6 +1261,7 @@
       "id",
       "link",
       "username",
+      "description",
       "botStatus",
       "sendStatus",
       "plan",
@@ -1158,6 +1271,13 @@
       "period",
       "rights",
       "lastMemberCount",
+      "memberCountAt",
+      "isForum",
+      "isProtected",
+      "slowModeDelay",
+      "linkedChatId",
+      "lastPostId",
+      "lastPostAt",
       "lastSeenAt",
       "inviteLink"
     ],
@@ -1166,14 +1286,14 @@
       "channels": "کانال‌ها",
       "targetType": "نوع مقصد",
       "numericId": "شناسه عددی",
-      "link": "لینک",
+      "link": "لینک عمومی مقصد",
       "username": "یوزرنیم",
       "botStatus": "وضعیت عضویت ربات",
-      "sendStatus": "وضعیت ارسال همگانی",
+      "sendStatus": "وضعیت مجاز بودن ارسال همگانی",
       "plan": "پلن مقصد",
       "monthlyLimit": "سقف ماهانه",
-      "monthlyUsed": "مصرف ماه جاری",
-      "remaining": "مانده سهمیه",
+      "monthlyUsed": "مصرف موفق ماه جاری",
+      "remaining": "سهمیه باقی‌مانده ماه جاری",
       "period": "دوره محاسبه",
       "permissions": "دسترسی‌های ربات",
       "active": "فعال",
@@ -1183,11 +1303,19 @@
       "title": "نام مقصد",
       "type": "نوع مقصد",
       "id": "شناسه عددی",
-      "rights": "دسترسی‌های ربات",
-      "lastMemberCount": "تعداد اعضا",
-      "lastSeenAt": "آخرین بروزرسانی",
-      "inviteLink": "لینک دعوت",
-      "unlimited": "نامحدود"
+      "rights": "دسترسی‌های فعلی ربات",
+      "lastMemberCount": "تعداد اعضا (آخرین مقدار ثبت‌شده)",
+      "lastSeenAt": "آخرین مشاهده توسط ربات",
+      "inviteLink": "لینک دعوت ثبت‌شده",
+      "unlimited": "نامحدود",
+      "description": "توضیحات مقصد",
+      "memberCountAt": "زمان آخرین بررسی تعداد اعضا",
+      "isForum": "گروه موضوعی",
+      "isProtected": "محافظت از محتوا",
+      "slowModeDelay": "محدودیت سرعت ارسال",
+      "linkedChatId": "شناسه مقصد متصل",
+      "lastPostId": "شناسه آخرین پست",
+      "lastPostAt": "زمان آخرین پست"
     },
     "text": {
       "planTitle": "انتخاب پلن",
@@ -1211,6 +1339,28 @@
       }
     ],
     "detailActions": [
+      {
+        "id": "refresh_details",
+        "label": "🔄 تازه‌سازی اطلاعات مقصد",
+        "color": "primary",
+        "actions": [
+          {
+            "type": "owner_panel_refresh_target",
+            "targetId": "{{callback.args.0}}"
+          }
+        ]
+      },
+      {
+        "id": "send_direct_message",
+        "label": "✉️ ارسال پیام اختصاصی",
+        "color": "primary",
+        "actions": [
+          {
+            "type": "owner_target_message_compose",
+            "targetId": "{{callback.args.0}}"
+          }
+        ]
+      },
       {
         "id": "toggle_send",
         "label": "وضعیت ارسال همگانی",
@@ -1268,8 +1418,50 @@
       "back": "⬅️ بازگشت",
       "customQuota": "سقف دلخواه با دستور",
       "setPlan": "تغییر پلن",
-      "setQuota": "سقف دلخواه"
+      "setQuota": "سقف دلخواه",
+      "sendDirect": "✉️ ارسال پیام اختصاصی",
+      "refreshDetails": "🔄 تازه‌سازی جزئیات",
+      "startBroadcast": "📢 پیام همگانی",
+      "confirmSend": "✅ تأیید ارسال",
+      "cancelSend": "لغو عملیات"
     },
-    "homeActions": []
-  }
+    "homeActions": [
+      {
+        "id": "broadcast_start",
+        "label": "📢 شروع پیام همگانی",
+        "color": "success",
+        "actions": [
+          {
+            "type": "owner_broadcast_compose"
+          }
+        ]
+      }
+    ],
+    "registryNote": "ثبت مقصد از رویدادهای my_chat_member، chat_member، پیام‌های گروه و channel_post انجام می‌شود. مقصدهایی که پیش از نصب Worker جدید وجود داشته‌اند و هیچ رویداد تازه‌ای تولید نکنند، از طریق Bot API قابل کشف یک‌جایی نیستند؛ با دریافت اولین رویداد مجدداً ثبت می‌شوند.",
+    "refreshIntervalSeconds": 300,
+    "directSend": {
+      "enabled": true,
+      "confirmationRequired": true,
+      "method": "copyMessage",
+      "preserveEntities": true,
+      "respectBotMembership": true,
+      "bypassBroadcastQuota": true,
+      "cancelCommand": "/cancel",
+      "draftTtlSeconds": 900
+    },
+    "broadcastFlow": {
+      "enabled": true,
+      "confirmationRequired": true,
+      "source": "owner_private_message",
+      "targets": [
+        "groups",
+        "channels"
+      ],
+      "maxTargets": 10000,
+      "draftTtlSeconds": 900,
+      "completionReport": true
+    }
+  },
+  "callbackRoutes": [],
+  "updateRoutes": []
 }
