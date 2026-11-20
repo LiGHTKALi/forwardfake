@@ -1,24 +1,26 @@
-name = "forwardfake"
+name = "munitos"
 main = "worker.js"
 compatibility_date = "2026-11-20"
-compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
 
 [vars]
-WEBHOOK_URL = "https://forwardfake.killerdutchmobin.workers.dev/telegram/webhook"
+# This is based on the workers.dev subdomain used by the previous Worker.
+# Change only this URL if the Cloudflare account subdomain is different.
+WEBHOOK_URL = "https://munitos.killerdutchmobin.workers.dev/telegram/webhook"
 
 [triggers]
+# One generic tick drives database-defined schedules and queue recovery.
 crons = ["* * * * *"]
+
+[[durable_objects.bindings]]
+name = "MUNITOS"
+class_name = "MunitosRuntime"
+
+[exports.MunitosRuntime]
+type = "durable-object"
+storage = "sqlite"
 
 [observability]
 enabled = true
 head_sampling_rate = 1
-
-[[durable_objects.bindings]]
-name = "SCHEDULER"
-class_name = "ForwardScheduler"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["ForwardScheduler"]
