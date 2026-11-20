@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const DO_NAME = "forward-scheduler-owner";
-const BUILD_VERSION = "5.4.9-cloudflare-single-config";
+const BUILD_VERSION = "5.4.10-cloudflare-native";
 const EMBEDDED_BOT_TOKEN = "9100041417:AAHYOpFKKTGpBQpdHoTAExwZYzlXPqOtSjg";
 const EMBEDDED_OWNER_TELEGRAM_ID = "8621035125";
 const EMBEDDED_WEBHOOK_SECRET = "fwd_scheduler_8621035125_5_4_0_telegram_edge";
@@ -262,10 +262,8 @@ class DatabaseConfigParser {
     if (char === "[") return this.#parseArray(depth);
     if (char === "'" || char === '"') return this.#readString(char);
     if (char === "`") {
-      // Template strings are retained as literal source text. This permits multiline
-      // JavaScript snippets inside database.json without evaluating them in the host.
-      // Template literals are read as inert config strings. A configured module
-      // source can later be executed only through Cloudflare Dynamic Workers.
+      // Template literals are accepted as inert configuration strings. The database
+      // parser supports JavaScript object-literal syntax, but does not execute code.
       return this.#readString("`");
     }
     const number = this.#readNumber();
@@ -1514,145 +1512,6 @@ class ForwardSchedulerRuntime {
     return data || { ok: false, error_code: 502, description: "INVALID_TELEGRAM_RESPONSE" };
   }
 
-  async #runDatabaseJavaScript(state, update) {
-    const javascript = this.#db(state)?.runtime?.javascript || {};
-    if (javascript.enabled !== true) return { enabled: false, actions: 0 };
-
-    const loader = this.env?.LOADER;
-    if (!loader || typeof loader.get !== "function") {
-      console.error(JSON.stringify({ event: "database_javascript_loader_unavailable" }));
-      return { enabled: true, actions: 0, error: "WORKER_LOADER_BINDING_MISSING" };
-    }
-
-    const toModuleSource = (value) => Array.isArray(value)
-      ? value.every((line) => typeof line === "string") ? value.join("\n") : ""
-      : typeof value === "string" ? value : "";
-    const source = toModuleSource(javascript.source);
-    const entrypointName = asText(javascript.entrypoint || "DatabaseScript");
-    const modules = { "database-script.js": source };
-    const extraModules = javascript.modules && typeof javascript.modules === "object" && !Array.isArray(javascript.modules)
-      ? javascript.modules : {};
-    let totalModuleBytes = new TextEncoder().encode(source).byteLength;
-    let validModules = Boolean(source) && source.length <= 256_000
-      && Object.keys(extraModules).length <= 32
-      && /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/.test(entrypointName);
-    for (const [moduleName, moduleSource] of Object.entries(extraModules)) {
-      const safeName = typeof moduleName === "string"
-        && /^[A-Za-z0-9_./-]+\.js$/.test(moduleName)
-        && !moduleName.split("/").includes("..")
-        && !moduleName.startsWith("/")
-        && moduleName !== "database-script.js";
-      const normalizedModuleSource = toModuleSource(moduleSource);
-      if (!safeName || !normalizedModuleSource) {
-        validModules = false;
-        break;
-      }
-      totalModuleBytes += new TextEncoder().encode(normalizedModuleSource).byteLength;
-      if (totalModuleBytes > 1_000_000) {
-        validModules = false;
-        break;
-      }
-      modules[moduleName] = normalizedModuleSource;
-    }
-    if (!validModules || totalModuleBytes > 1_000_000) {
-      console.error(JSON.stringify({ event: "database_javascript_config_invalid" }));
-      return { enabled: true, actions: 0, error: "DATABASE_JAVASCRIPT_CONFIG_INVALID" };
-    }
-
-    try {
-      const codeSignature = JSON.stringify({ entrypointName, modules: Object.entries(modules).sort(([a], [b]) => a.localeCompare(b)) });
-      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeSignature));
-      const codeHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-      const workerId = `munitos-database-script:${codeHash}`;
-      const worker = loader.get(workerId, async () => ({
-        compatibilityDate: "2026-11-20",
-        compatibilityFlags: ["nodejs_compat"],
-        mainModule: "database-script.js",
-        modules,
-        // Database extensions cannot open arbitrary outbound network connections.
-        // Telegram requests are returned as actions and executed by the main Worker.
-        globalOutbound: null,
-      }));
-      const entrypoint = worker.getEntrypoint(entrypointName);
-      if (!entrypoint || typeof entrypoint.run !== "function") {
-        throw new Error(`DATABASE_SCRIPT_ENTRYPOINT_INVALID:${entrypointName}`);
-      }
-
-      const message = update?.message || update?.edited_message || update?.business_message
-        || update?.edited_business_message || update?.guest_message;
-      const callback = update?.callback_query;
-      const chat = message?.chat || callback?.message?.chat || update?.chat_member?.chat
-        || update?.my_chat_member?.chat || update?.chat_join_request?.chat || null;
-      const database = structuredClone(this.#db(state) || {});
-      const persistedScriptStorage = await this.ctx.storage.get("database-script:v1:state");
-      const scriptStorage = persistedScriptStorage && typeof persistedScriptStorage === "object" && !Array.isArray(persistedScriptStorage)
-        ? structuredClone(persistedScriptStorage) : {};
-      const result = await entrypoint.run({
-        update: structuredClone(update),
-        updateType: getTelegramUpdateType(update),
-        database,
-        storage: scriptStorage,
-        now: Date.now(),
-        bot: { ownerId: this.#ownerId(state), version: BUILD_VERSION },
-      });
-
-      const actions = Array.isArray(result) ? result : Array.isArray(result?.actions) ? result.actions : [];
-      if (actions.length > 20) throw new Error("DATABASE_SCRIPT_ACTION_LIMIT_EXCEEDED");
-      let completed = 0;
-      for (const action of actions) {
-        const method = asText(action?.method);
-        const parameters = action?.parameters ?? action?.params ?? {};
-        if (!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(method)
-          || !parameters || typeof parameters !== "object" || Array.isArray(parameters)) {
-          console.error(JSON.stringify({ event: "database_javascript_action_rejected", reason: "invalid_action_shape" }));
-          continue;
-        }
-        const targetChatId = parameters.chat_id ?? chat?.id;
-        const isTargetGroup = Boolean(action?.group === true || (chat && isGroup(chat)
-          && targetChatId != null && String(targetChatId) === String(chat.id)));
-        const options = {
-          group: isTargetGroup,
-          minIntervalMs: Number.isFinite(Number(action?.minIntervalMs))
-            ? clampNumber(action.minIntervalMs, isTargetGroup ? 3_500 : 1_000, 1_000, 4_000)
-            : undefined,
-        };
-        const response = await this.#telegram(state, method, parameters, options);
-        completed += 1;
-        if (!response?.ok) {
-          console.error(JSON.stringify({
-            event: "database_javascript_telegram_action_failed",
-            method,
-            errorCode: Number(response?.error_code || 0),
-            description: asText(response?.description || response?.error || "unknown").slice(0, 120),
-          }));
-        }
-      }
-      if (result && !Array.isArray(result) && Object.prototype.hasOwnProperty.call(result, "storage")) {
-        if (result.storage === null) {
-          await this.ctx.storage.delete("database-script:v1:state");
-        } else {
-          const serializedStorage = JSON.stringify(result.storage);
-          if (!serializedStorage || serializedStorage.length > 256_000) {
-            throw new Error("DATABASE_SCRIPT_STORAGE_SIZE_LIMIT_EXCEEDED");
-          }
-          const nextStorage = JSON.parse(serializedStorage);
-          if (!nextStorage || typeof nextStorage !== "object" || Array.isArray(nextStorage)
-            || Object.keys(nextStorage).length > 500) {
-            throw new Error("DATABASE_SCRIPT_STORAGE_SHAPE_INVALID");
-          }
-          await this.ctx.storage.put("database-script:v1:state", nextStorage);
-        }
-      }
-      return { enabled: true, actions: completed };
-    } catch (error) {
-      console.error(JSON.stringify({
-        event: "database_javascript_execution_failed",
-        error: asText(error?.message || error).slice(0, 220),
-      }));
-      return { enabled: true, actions: 0, error: asText(error?.message || error).slice(0, 160) };
-    }
-  }
-
   async #send(chatId, text, state, extra = {}, options = {}) {
     if (chatId == null || String(chatId).trim() === "") return { ok: false, error_code: 400, description: "CHAT_ID_MISSING" };
     const body = String(text ?? "").slice(0, 4_000);
@@ -1828,7 +1687,7 @@ class ForwardSchedulerRuntime {
       await this.#telegram(state, "editMessageText", {
         chat_id: chatId,
         message_id: callback.message.message_id,
-        text: "DATABASE INSTALLATION\n\nUpload only database.json. Runtime settings and JavaScript module code are stored in that file. Set runtime.javascript.enabled to true to enable the database module. The Worker Loader binding is configured once in wrangler.toml; Telegram API actions are executed by the main Worker through its shared API gateway. Do not upload a separate JavaScript database file.",
+        text: "DATABASE INSTALLATION\n\nUpload only database.json. The database parser accepts JavaScript object-literal data syntax: comments, unquoted keys, single-quoted strings, trailing commas and template strings as literal text. Arbitrary JavaScript code is not executed. Telegram API actions use the main Worker shared API gateway. Do not upload a separate JavaScript database file.",
         reply_markup: { inline_keyboard: [[button("Back to Settings", "settings:refresh", "primary")]] },
       }, { bypassLocalRate: true });
       return;
@@ -2191,7 +2050,7 @@ class ForwardSchedulerRuntime {
         : code.startsWith("resource_") ? "A database resource configuration is outside the supported storage limits."
           : code === "DATABASE_STORAGE_CHUNK_MISSING" || code === "DATABASE_STORAGE_HASH_MISMATCH" ? "The uploaded data could not be verified after storage."
             : code.startsWith("database_config_executable_expression_not_supported")
-              ? "The database contains an unsupported executable expression. Keep configuration values as JSON data and place JavaScript module code in runtime.javascript.source."
+              ? "The database contains unsupported executable JavaScript. Use supported JavaScript object-literal data syntax only; arbitrary code is not executed by this Cloudflare Worker."
               : "The database schema or supported JSON-plus-JavaScript data syntax is invalid.";
       console.error("Database installation rejected", code.slice(0, 120));
       await this.#send(this.#ownerId(state), `Database installation failed: ${reason} The previously installed database remains active.`, state);
@@ -2715,7 +2574,7 @@ class ForwardSchedulerRuntime {
         state.flow = "database_upload";
         await this.#save(state);
         await this.#send(chat.id,
-          "DATABASE INSTALLATION\n\nUpload only database.json. Runtime settings and JavaScript module code are stored in that file. Set runtime.javascript.enabled to true to enable the database module. The Worker Loader binding is configured once in wrangler.toml; Telegram API actions are executed by the main Worker through its shared API gateway. Do not upload a separate JavaScript database file.",
+          "DATABASE INSTALLATION\n\nUpload only database.json. The database parser accepts JavaScript object-literal data syntax: comments, unquoted keys, single-quoted strings, trailing commas and template strings as literal text. Arbitrary JavaScript code is not executed. Telegram API actions use the main Worker shared API gateway. Do not upload a separate JavaScript database file.",
           state,
         );
         return;
@@ -4122,7 +3981,6 @@ class ForwardSchedulerRuntime {
       return;
     }
     await this.#save(state);
-    await this.#runDatabaseJavaScript(state, update);
 
     if (callback) {
       const callbackData = asText(callback.data);

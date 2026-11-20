@@ -19,9 +19,6 @@ head_sampling_rate = 1
 name = "SCHEDULER"
 class_name = "ForwardScheduler"
 
-[[worker_loaders]]
-binding = "LOADER"
-
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ForwardScheduler"]

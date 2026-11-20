@@ -1,27 +1,29 @@
 {
   "schemaVersion": 5,
-  "version": "5.4.9-cloudflare-single-config",
+  "version": "5.4.10-cloudflare-native",
   "name": "MUNITOS Group Management Database",
   "language": "fa",
-  "description": "مدیریت گروه و کانال، پیام همگانی مالک، سهمیه ماهانه پلن‌ها، خوش‌آمدگویی مجدد و کنترل‌های وضعیت پویا.",
+  "description": "مدیریت گروه و کانال، پیام همگانی مالک، سهمیه ماهانه پلن‌ها، خوش‌آمدگویی مجدد و پیام خداحافظی. Compatible with standard Cloudflare Workers; no Dynamic Workers binding.",
   "runtime": {
     "telegram": {
       "parseMode": "HTML"
     },
     "javascript": {
-      "enabled": true,
-      "entrypoint": "DatabaseScript",
-      "modules": {},
-      "source": [
-        "import { WorkerEntrypoint } from 'cloudflare:workers';",
-        "",
-        "export class DatabaseScript extends WorkerEntrypoint {",
-        "  async run(context) {",
-        "    const { update, updateType, database, now, bot } = context;",
-        "    return { actions: [] };",
-        "  }",
-        "}"
-      ]
+      "enabled": false,
+      "mode": "object-literal-data",
+      "execution": "disabled",
+      "supportedSyntax": [
+        "line-comments",
+        "block-comments",
+        "unquoted-object-keys",
+        "single-quoted-strings",
+        "trailing-commas",
+        "template-strings-as-literal-text",
+        "hex-binary-octal-and-exponent-numbers",
+        "export-default-object",
+        "module-exports-object"
+      ],
+      "note": "This setting controls data syntax only. Arbitrary JavaScript execution is not available in a standard Cloudflare Worker without bundling a separate JavaScript interpreter."
     },
     "capabilities": [
       "group.moderation.silence",
