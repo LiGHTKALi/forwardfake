@@ -1,12 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 
-// Source-embedded Telegram credentials requested by the owner.
+const DO_NAME = "forward-scheduler-owner";
+const BUILD_VERSION = "5.4.9-cloudflare-single-config";
 const EMBEDDED_BOT_TOKEN = "9100041417:AAHYOpFKKTGpBQpdHoTAExwZYzlXPqOtSjg";
 const EMBEDDED_OWNER_TELEGRAM_ID = "8621035125";
-const DO_NAME = "forward-scheduler-owner";
-const BUILD_VERSION = "5.4.3";
-const WEBHOOK_URL = "https://forwardfake.killerdutchmobin.workers.dev/telegram/webhook";
-const WEBHOOK_SECRET = "fwd_scheduler_8621035125_5_4_0_telegram_edge";
+const EMBEDDED_WEBHOOK_SECRET = "fwd_scheduler_8621035125_5_4_0_telegram_edge";
+const EMBEDDED_WEBHOOK_URL = "https://forwardfake.killerdutchmobin.workers.dev/telegram/webhook";
+
 const WEBHOOK_MAX_CONNECTIONS = 10;
 const WEBHOOK_CHECK_INTERVAL_MS = 5 * 60_000;
 
@@ -93,24 +93,264 @@ function parseMessageLink(value) {
   return [`@${parts[0]}`, messageId];
 }
 
-function parseDatabaseModule(source) {
+class DatabaseConfigParser {
+  constructor(source) {
+    this.source = String(source ?? "");
+    this.index = 0;
+    this.nodes = 0;
+  }
+
+  #skipTrivia() {
+    while (this.index < this.source.length) {
+      const char = this.source[this.index];
+      if (/\s/.test(char)) {
+        this.index += 1;
+        continue;
+      }
+      if (char === "/" && this.source[this.index + 1] === "/") {
+        this.index += 2;
+        while (this.index < this.source.length && !/[\r\n]/.test(this.source[this.index])) this.index += 1;
+        continue;
+      }
+      if (char === "/" && this.source[this.index + 1] === "*") {
+        const end = this.source.indexOf("*/", this.index + 2);
+        if (end < 0) throw new Error("database_config_unclosed_comment");
+        this.index = end + 2;
+        continue;
+      }
+      break;
+    }
+  }
+
+  #countNode() {
+    this.nodes += 1;
+    if (this.nodes > MAX_DATABASE_NODES) throw new Error("database_config_node_limit_exceeded");
+  }
+
+  #readString(quote) {
+    this.index += 1;
+    let output = "";
+    while (this.index < this.source.length) {
+      const char = this.source[this.index++];
+      if (char === quote) return output;
+      if ((char === "\n" || char === "\r") && quote !== "`") throw new Error("database_config_unescaped_line_break");
+      if (char !== "\\") {
+        output += char;
+        continue;
+      }
+      if (this.index >= this.source.length) throw new Error("database_config_invalid_escape");
+      const escaped = this.source[this.index++];
+      const simple = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", "0": "\0" };
+      if (Object.hasOwn(simple, escaped)) {
+        output += simple[escaped];
+      } else if (escaped === "u") {
+        const hex = this.source.slice(this.index, this.index + 4);
+        if (!/^[0-9a-fA-F]{4}$/.test(hex)) throw new Error("database_config_invalid_unicode_escape");
+        output += String.fromCharCode(parseInt(hex, 16));
+        this.index += 4;
+      } else if (escaped === "x") {
+        const hex = this.source.slice(this.index, this.index + 2);
+        if (!/^[0-9a-fA-F]{2}$/.test(hex)) throw new Error("database_config_invalid_hex_escape");
+        output += String.fromCharCode(parseInt(hex, 16));
+        this.index += 2;
+      } else if (escaped === "\n") {
+        continue;
+      } else if (escaped === "\r") {
+        if (this.source[this.index] === "\n") this.index += 1;
+      } else {
+        output += escaped;
+      }
+    }
+    throw new Error("database_config_unclosed_string");
+  }
+
+  #readIdentifier() {
+    const match = this.source.slice(this.index).match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
+    if (!match) return "";
+    this.index += match[0].length;
+    return match[0];
+  }
+
+  #readNumber() {
+    const match = this.source.slice(this.index).match(/^[+-]?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/);
+    if (!match) return null;
+    const raw = match[0];
+    const next = this.source[this.index + raw.length];
+    if (next && /[A-Za-z0-9_$]/.test(next)) return null;
+    this.index += raw.length;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) throw new Error("database_config_non_finite_number");
+    return value;
+  }
+
+  #parseObject(depth) {
+    const output = {};
+    this.index += 1;
+    this.#skipTrivia();
+    if (this.source[this.index] === "}") {
+      this.index += 1;
+      return output;
+    }
+    for (;;) {
+      this.#skipTrivia();
+      const quote = this.source[this.index];
+      let key = "";
+      if (quote === "'" || quote === '"') {
+        key = this.#readString(quote);
+      } else {
+        key = this.#readIdentifier();
+      }
+      if (!key || ["__proto__", "prototype", "constructor"].includes(key)) {
+        throw new Error("database_config_object_key_invalid");
+      }
+      this.#skipTrivia();
+      if (this.source[this.index] !== ":") throw new Error("database_config_expected_colon");
+      this.index += 1;
+      this.#skipTrivia();
+      if (Object.hasOwn(output, key)) throw new Error(`database_config_duplicate_key:${key}`);
+      output[key] = this.#parseValue(depth + 1);
+      this.#skipTrivia();
+      const separator = this.source[this.index];
+      if (separator === "}") {
+        this.index += 1;
+        return output;
+      }
+      if (separator !== ",") throw new Error("database_config_expected_object_separator");
+      this.index += 1;
+      this.#skipTrivia();
+      if (this.source[this.index] === "}") {
+        this.index += 1;
+        return output;
+      }
+    }
+  }
+
+  #parseArray(depth) {
+    const output = [];
+    this.index += 1;
+    this.#skipTrivia();
+    if (this.source[this.index] === "]") {
+      this.index += 1;
+      return output;
+    }
+    for (;;) {
+      this.#skipTrivia();
+      if (this.source[this.index] === ",") throw new Error("database_config_sparse_array_not_supported");
+      output.push(this.#parseValue(depth + 1));
+      this.#skipTrivia();
+      const separator = this.source[this.index];
+      if (separator === "]") {
+        this.index += 1;
+        return output;
+      }
+      if (separator !== ",") throw new Error("database_config_expected_array_separator");
+      this.index += 1;
+      this.#skipTrivia();
+      if (this.source[this.index] === "]") {
+        this.index += 1;
+        return output;
+      }
+    }
+  }
+
+  #parseValue(depth = 0) {
+    this.#skipTrivia();
+    this.#countNode();
+    if (depth > MAX_DATABASE_DEPTH) throw new Error("database_config_depth_limit_exceeded");
+    const char = this.source[this.index];
+    if (char === "{") return this.#parseObject(depth);
+    if (char === "[") return this.#parseArray(depth);
+    if (char === "'" || char === '"') return this.#readString(char);
+    if (char === "`") {
+      // Template strings are retained as literal source text. This permits multiline
+      // JavaScript snippets inside database.json without evaluating them in the host.
+      // Template literals are read as inert config strings. A configured module
+      // source can later be executed only through Cloudflare Dynamic Workers.
+      return this.#readString("`");
+    }
+    const number = this.#readNumber();
+    if (number !== null) return number;
+    const identifier = this.#readIdentifier();
+    if (identifier === "true") return true;
+    if (identifier === "false") return false;
+    if (identifier === "null") return null;
+    if (identifier) throw new Error(`database_config_executable_expression_not_supported:${identifier}`);
+    throw new Error("database_config_value_invalid");
+  }
+
+  parse() {
+    const value = this.#parseValue(0);
+    this.#skipTrivia();
+    if (this.source[this.index] === ";") {
+      this.index += 1;
+      this.#skipTrivia();
+    }
+    return { value, remainder: this.source.slice(this.index).trim() };
+  }
+}
+
+function skipDatabaseTrivia(source) {
+  let index = 0;
+  while (index < source.length) {
+    if (/\s/.test(source[index])) {
+      index += 1;
+      continue;
+    }
+    if (source[index] === "/" && source[index + 1] === "/") {
+      index += 2;
+      while (index < source.length && !/[\r\n]/.test(source[index])) index += 1;
+      continue;
+    }
+    if (source[index] === "/" && source[index + 1] === "*") {
+      const end = source.indexOf("*/", index + 2);
+      if (end < 0) throw new Error("database_config_unclosed_comment");
+      index = end + 2;
+      continue;
+    }
+    break;
+  }
+  return index;
+}
+
+function parseDatabaseConfig(source) {
   const raw = String(source ?? "").replace(/^\uFEFF/, "").trim();
   const bytes = new TextEncoder().encode(raw).byteLength;
   if (!raw || bytes > MAX_DATABASE_BYTES) throw new Error("database_size_invalid");
 
   let body = raw;
+  const first = skipDatabaseTrivia(body);
+  body = body.slice(first);
+  let exportedName = "";
   if (body.startsWith("export default")) {
     body = body.slice("export default".length).trim();
-    if (body.endsWith(";")) body = body.slice(0, -1).trim();
+  } else if (body.startsWith("module.exports")) {
+    const match = body.match(/^module\.exports\s*=/);
+    if (!match) throw new Error("database_config_module_assignment_invalid");
+    body = body.slice(match[0].length).trim();
+  } else {
+    const match = body.match(/^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/);
+    if (match) {
+      exportedName = match[1];
+      body = body.slice(match[0].length).trim();
+    }
   }
-  if (!body.startsWith("{") || !body.endsWith("}")) throw new Error("database_must_be_json_object");
 
-  let database;
+  let parsed;
   try {
-    database = JSON.parse(body);
-  } catch {
-    throw new Error("database_must_use_data_only_json");
+    parsed = new DatabaseConfigParser(body).parse();
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("database_config_")) throw error;
+    throw new Error("database_config_parse_failed");
   }
+  if (parsed.remainder) {
+    const expectedExport = exportedName
+      ? new RegExp(`^export\\s+default\\s+${exportedName}\\s*;?$`)
+      : null;
+    if (!expectedExport || !expectedExport.test(parsed.remainder)) {
+      throw new Error("database_config_trailing_code_not_supported");
+    }
+  }
+  const database = parsed.value;
   validateDatabase(database);
   return database;
 }
@@ -209,6 +449,7 @@ function validateDatabase(database) {
     "moderation.unban", "moderation.ban_list", "moderation.clean_ban_list",
     "welcome.on", "welcome.off", "welcome.set", "welcome.get", "welcome.reset",
     "welcome.set_time", "welcome.set_media",
+    "goodbye.on", "goodbye.off", "goodbye.set", "goodbye.get", "goodbye.reset", "goodbye.set_media",
   ]);
   if (database.commands != null) {
     if (!Array.isArray(database.commands) || database.commands.length > 100) throw new Error("database_commands_invalid");
@@ -323,7 +564,7 @@ function validateDatabase(database) {
     }
   }
 
-  // The uploaded file is parsed as strict JSON data, never evaluated as executable JavaScript.
+  // Uploaded database modules are parsed as safe data literals; uploaded code is never executed.
   // Bound nesting, total nodes, keys, and strings so pathological files cannot exhaust the Worker.
   const stack = [{ value: database, path: "database", depth: 0 }];
   let nodes = 0;
@@ -587,6 +828,7 @@ function databaseCommandEnabled(definition, database) {
   const handler = String(definition.handler || "");
   if (handler.startsWith("moderation.")) return database?.features?.moderation?.enabled === true;
   if (handler.startsWith("welcome.")) return database?.features?.welcome?.enabled === true;
+  if (handler.startsWith("goodbye.")) return database?.features?.goodbye?.enabled === true;
   return true;
 }
 
@@ -691,69 +933,6 @@ function reserveSplitQuota(currentQuota, ownerRequest, now = Date.now()) {
   };
 }
 
-async function getCloudflareWorkersUsage({ accountId, apiToken, scriptName = "", now = new Date(), timeoutMs = 8_000 } = {}) {
-  const accountTag = String(accountId || "").trim();
-  const token = String(apiToken || "").trim();
-  const script = String(scriptName || "").trim();
-  if (!/^[a-f0-9]{32}$/i.test(accountTag) || token.length < 20 || !/^[A-Za-z0-9_-]{1,128}$/.test(script)) {
-    return { ok: false, reason: "CLOUDFLARE_ANALYTICS_CREDENTIALS_MISSING" };
-  }
-  const current = now instanceof Date ? now : new Date(now);
-  if (!Number.isFinite(current.getTime())) return { ok: false, reason: "INVALID_TIME" };
-  const start = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate())).toISOString();
-  const end = current.toISOString();
-  // Account-wide numbers relate to the Free plan's aggregate cap; script numbers identify this Worker.
-  const query = `query GetWorkersDailyUsage($accountTag: string, $datetimeStart: string, $datetimeEnd: string, $scriptName: string) {
-    viewer {
-      accounts(filter: {accountTag: $accountTag}) {
-        accountWide: workersInvocationsAdaptive(limit: 10000, filter: {
-          datetime_geq: $datetimeStart,
-          datetime_leq: $datetimeEnd
-        }) { sum { requests errors subrequests } }
-        thisWorker: workersInvocationsAdaptive(limit: 10000, filter: {
-          scriptName: $scriptName,
-          datetime_geq: $datetimeStart,
-          datetime_leq: $datetimeEnd
-        }) { sum { requests errors subrequests } }
-      }
-    }
-  }`;
-  try {
-    const response = await fetch("https://api.cloudflare.com/client/v4/graphql", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/json",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ query, variables: { accountTag, datetimeStart: start, datetimeEnd: end, scriptName: script } }),
-      signal: AbortSignal.timeout(Math.max(1_000, Math.min(15_000, Number(timeoutMs) || 8_000))),
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || payload?.errors?.length || !payload?.data?.viewer?.accounts?.length) {
-      return { ok: false, reason: `CLOUDFLARE_GRAPHQL_${response.status || "INVALID_RESPONSE"}` };
-    }
-    const account = payload.data.viewer.accounts[0];
-    const sumBuckets = (buckets = []) => buckets.reduce((sum, bucket) => {
-      sum.requests += Number(bucket.sum?.requests || 0);
-      sum.errors += Number(bucket.sum?.errors || 0);
-      sum.subrequests += Number(bucket.sum?.subrequests || 0);
-      return sum;
-    }, { requests: 0, errors: 0, subrequests: 0 });
-    return {
-      ok: true,
-      account: sumBuckets(account.accountWide || []),
-      worker: sumBuckets(account.thisWorker || []),
-      from: start,
-      to: end,
-      fetchedAt: current.toISOString(),
-    };
-  } catch (error) {
-    return { ok: false, reason: `CLOUDFLARE_ANALYTICS_NETWORK:${asText(error?.message || error).slice(0, 100)}` };
-  }
-}
-
-
 // Forward Scheduler runtime implementation. The Worker entrypoint only validates
 // incoming requests and delegates durable work to this runtime.
 const BOT_API = "https://api.telegram.org/bot";
@@ -783,8 +962,86 @@ const OUTBOUND_METHODS = new Set([
   "declineChatJoinRequest", "setChatTitle", "setChatDescription", "setChatPhoto",
   "deleteChatPhoto", "leaveChat",
 ]);
-function botTokenFrom(env) { return String(env?.EMBEDDED_BOT_TOKEN || env?.BOT_TOKEN || "").trim(); }
+// Keep rate limiting future-compatible: newly added Telegram send/mutation methods
+// pass through the same gateway without requiring an allow-list edit.
+function isTelegramOutboundMethod(method) {
+  return OUTBOUND_METHODS.has(method)
+    || /^(?:send|forward|copy|editMessage|deleteMessage|pinChat|unpinChat|banChat|unbanChat|restrictChat|promoteChat|setChat|deleteChat|leaveChat|approveChat|declineChat|createForumTopic|editForumTopic|closeForumTopic|reopenForumTopic|deleteForumTopic|unpinAllForumTopicMessages)/.test(String(method || ""));
+}
+function botTokenFrom(env) { return String(env?.BOT_TOKEN || EMBEDDED_BOT_TOKEN).trim(); }
+function ownerIdFrom(env) {
+  const value = String(env?.OWNER_TELEGRAM_ID || EMBEDDED_OWNER_TELEGRAM_ID).trim();
+  return /^\d{1,20}$/.test(value) && Number(value) > 0 ? value : "";
+}
+function webhookUrlFrom(env) {
+  return String(env?.WEBHOOK_URL || EMBEDDED_WEBHOOK_URL).trim().replace(/\/$/, "");
+}
+function webhookSecretFrom(env) { return String(env?.WEBHOOK_SECRET || EMBEDDED_WEBHOOK_SECRET).trim(); }
+function redactBotToken(value, env) {
+  const message = String(value?.message || value || "");
+  const token = botTokenFrom(env);
+  return token ? message.replaceAll(token, "[redacted]") : message;
+}
+
+async function requestTelegramApi(env, method, payload = {}, options = {}) {
+  const token = botTokenFrom(env);
+  if (!/^\d{6,12}:[A-Za-z0-9_-]{25,}$/.test(token)) {
+    return { ok: false, error_code: 401, description: "BOT_TOKEN_MISSING_OR_INVALID" };
+  }
+  if (!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(String(method || ""))) {
+    return { ok: false, error_code: 400, description: "TELEGRAM_METHOD_INVALID" };
+  }
+
+  const timeoutMs = clampNumber(options.timeoutMs, TELEGRAM_TIMEOUT_MS, 1_000, 60_000);
+  const isFormData = typeof FormData !== "undefined" && payload instanceof FormData;
+  const request = async (body) => {
+    const response = await fetch(`${BOT_API}${token}/${method}`, {
+      method: "POST",
+      headers: isFormData ? {} : { "content-type": "application/json" },
+      body: isFormData ? body : JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = await response.json().catch(() => null);
+    if (!data || typeof data !== "object") {
+      return { ok: false, error_code: response.status || 502, description: "INVALID_TELEGRAM_RESPONSE" };
+    }
+    return data;
+  };
+
+  try {
+    let data = null;
+    for (let attempt = 0; attempt <= 1; attempt += 1) {
+      data = await request(payload);
+      const retryAfter = Number(data?.parameters?.retry_after || 0);
+      if ((data?.error_code === 429) && attempt === 0 && options.retry429 !== false && retryAfter <= 8) {
+        const delay = Math.max(retryAfter * 1_000, 500 * (2 ** attempt)) + Math.floor(Math.random() * 250);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      break;
+    }
+
+    const parseFailure = !data?.ok && !isFormData && payload?.parse_mode
+      && /can't parse entities|can't find end of the entity|unsupported start tag|unsupported end tag|entity.*not found/i.test(String(data?.description || ""));
+    if (parseFailure) {
+      const plainPayload = { ...payload };
+      delete plainPayload.parse_mode;
+      data = await request(plainPayload);
+    }
+    return data || { ok: false, error_code: 502, description: "INVALID_TELEGRAM_RESPONSE" };
+  } catch (error) {
+    const safeError = asText(error?.message || error)
+      .replaceAll(token, "[redacted]")
+      .replace(/https?:\/\/api\.telegram\.org\//gi, "[telegram-api]")
+      .slice(0, 120);
+    return { ok: false, description: `NETWORK_ERROR:${safeError}` };
+  }
+}
+
 function button(text, callbackData, style = "primary") { return makeKeyboardButton(text, callbackData, style); }
+function toggleButton(label, enabled, callbackData) {
+  return button(`${label}: ${enabled ? "ON" : "OFF"}`, callbackData, enabled ? "success" : "danger");
+}
 
 function isGroup(chat) {
   return chat?.type === "group" || chat?.type === "supergroup";
@@ -860,6 +1117,7 @@ function defaultState() {
     welcomeDedup: {},
     welcomeDelivered: {},
     welcomeQueue: [],
+    memberStates: {},
     groupModerationLists: {},
     groups: {},
     groupUsage: {},
@@ -937,6 +1195,9 @@ function mergeState(value) {
     welcomeDedup: value.welcomeDedup && typeof value.welcomeDedup === "object" && !Array.isArray(value.welcomeDedup) ? value.welcomeDedup : {},
     welcomeDelivered: value.welcomeDelivered && typeof value.welcomeDelivered === "object" && !Array.isArray(value.welcomeDelivered) ? Object.fromEntries(Object.entries(value.welcomeDelivered).slice(-5_000)) : {},
     welcomeQueue: Array.isArray(value.welcomeQueue) ? value.welcomeQueue.filter((item) => item && /^-?\d{1,20}$/.test(String(item.chatId || "")) && item.member?.id).slice(-2_000) : [],
+    memberStates: value.memberStates && typeof value.memberStates === "object" && !Array.isArray(value.memberStates)
+      ? Object.fromEntries(Object.entries(value.memberStates).filter(([key, item]) => /^-?\d{1,20}:\d{1,20}$/.test(key) && item && ["member", "left"].includes(item.status)).slice(-20_000))
+      : {},
     groupModerationLists: value.groupModerationLists && typeof value.groupModerationLists === "object" && !Array.isArray(value.groupModerationLists)
       ? Object.fromEntries(Object.entries(value.groupModerationLists).slice(-1_000).map(([chatId, lists]) => [chatId, {
         silent: lists?.silent && typeof lists.silent === "object" && !Array.isArray(lists.silent) ? Object.fromEntries(Object.entries(lists.silent).slice(-1_000)) : {},
@@ -1017,7 +1278,7 @@ class ForwardSchedulerRuntime {
     return structuredClone(snapshot);
   }
 
-  async #storeDatabaseChunks(source, hash, filename = "database.js") {
+  async #storeDatabaseChunks(source, hash, filename = "database.json") {
     const prefix = `database:v1:${hash}:chunk:`;
     const writes = [];
     for (let offset = 0, index = 0; offset < source.length; index += 1) {
@@ -1073,7 +1334,7 @@ class ForwardSchedulerRuntime {
     if (this.databaseCacheHash === manifest.hash && this.databaseCache) {
       state.db = this.databaseCache;
       state.dbHash = manifest.hash;
-      state.dbFileName = manifest.filename || "database.js";
+      state.dbFileName = "database.json";
       state.dbInstalledAt = Number(manifest.installedAt || state.dbInstalledAt || 0) || null;
       return;
     }
@@ -1085,12 +1346,12 @@ class ForwardSchedulerRuntime {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
     const actualHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
     if (actualHash !== manifest.hash) throw new Error("DATABASE_STORAGE_HASH_MISMATCH");
-    const database = parseDatabaseModule(source);
+    const database = parseDatabaseConfig(source);
     this.databaseCacheHash = manifest.hash;
     this.databaseCache = database;
     state.db = database;
     state.dbHash = manifest.hash;
-    state.dbFileName = manifest.filename || "database.js";
+    state.dbFileName = "database.json";
     state.dbInstalledAt = Number(manifest.installedAt || state.dbInstalledAt || 0) || null;
   }
 
@@ -1144,11 +1405,9 @@ class ForwardSchedulerRuntime {
       await this.ctx.storage.put("state", this.#persistableState(state));
     }
     await this.#hydrateDatabase(state);
-    const configuredOwner = String(this.env?.OWNER_TELEGRAM_ID || "").trim();
-    state.security.ownerId = /^\d{1,20}$/.test(configuredOwner) && Number(configuredOwner) > 0
-      ? configuredOwner
-      : null;
-    state.security.credentialSource = "configured-owner";
+    const configuredOwner = ownerIdFrom(this.env);
+    state.security.ownerId = configuredOwner || null;
+    state.security.credentialSource = this.env?.OWNER_TELEGRAM_ID ? "environment-override" : "embedded-default";
     if (raw && (Object.hasOwn(raw, "db") || String(raw.security?.ownerId || "") !== String(state.security.ownerId || ""))) {
       await this.ctx.storage.put("state", this.#persistableState(state));
     }
@@ -1162,8 +1421,7 @@ class ForwardSchedulerRuntime {
   }
 
   #ownerId(state) {
-    const configured = String(this.env?.OWNER_TELEGRAM_ID || "").trim();
-    return /^\d{1,20}$/.test(configured) && Number(configured) > 0 ? configured : "";
+    return ownerIdFrom(this.env);
   }
 
   #db(state) {
@@ -1196,10 +1454,10 @@ class ForwardSchedulerRuntime {
   async #telegram(state, method, payload = {}, options = {}) {
     const botToken = botTokenFrom(this.env);
     if (typeof botToken !== "string" || !/^\d{6,12}:[A-Za-z0-9_-]{25,}$/.test(botToken)) {
-      return { ok: false, error_code: 401, description: "EMBEDDED_BOT_TOKEN_INVALID" };
+      return { ok: false, error_code: 401, description: "BOT_TOKEN_MISSING_OR_INVALID" };
     }
 
-    if (!options.bypassLocalRate && OUTBOUND_METHODS.has(method)) {
+    if (!options.bypassLocalRate && isTelegramOutboundMethod(method)) {
       const chatId = String(payload.chat_id ?? "");
       const limits = this.#db(state)?.limits || {};
       const ownerPrivateChat = !options.group && chatId === this.#ownerId(state);
@@ -1241,56 +1499,157 @@ class ForwardSchedulerRuntime {
     const useCache = cacheable && this.#cacheEnabled(state);
     const cached = useCache ? this.telegramCache.get(cacheKey) : null;
     if (cached && cached.expiresAt > Date.now()) return cached.value;
-    const requestTimeoutMs = clampNumber(options.timeoutMs, TELEGRAM_TIMEOUT_MS, 1_000, 60_000);
-    try {
-      let data = null;
-      for (let attempt = 0; attempt <= 1; attempt += 1) {
-        const response = await fetch(`${BOT_API}${botToken}/${method}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(requestTimeoutMs),
-        });
-        data = await response.json().catch(() => null);
-        const retryAfter = Number(data?.parameters?.retry_after || 0);
-        if ((response.status === 429 || data?.error_code === 429) && attempt === 0 && options.retry429 !== false) {
-          // Do not retry earlier than Telegram's requested cooldown. Long delays are
-          // surfaced to the durable scheduler instead of holding a Worker invocation.
-          if (retryAfter > 8) break;
-          const delay = Math.max(retryAfter * 1_000, 500 * (2 ** attempt)) + Math.floor(Math.random() * 250);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-        if (!data || typeof data !== "object") data = { ok: false, error_code: response.status || 502, description: "INVALID_TELEGRAM_RESPONSE" };
+    const data = await requestTelegramApi(this.env, method, payload, {
+      ...options,
+      timeoutMs: options.timeoutMs,
+    });
+    if (data?.ok && useCache) {
+      const ttl = method === "getMe" ? 6 * 60 * 60_000 : method === "getChatMemberCount" ? 60_000 : 20_000;
+      this.telegramCache.set(cacheKey, { value: data, expiresAt: Date.now() + ttl });
+      if (this.telegramCache.size > 1_000) {
+        for (const [key, entry] of this.telegramCache) if (entry.expiresAt <= Date.now()) this.telegramCache.delete(key);
+        while (this.telegramCache.size > 800) this.telegramCache.delete(this.telegramCache.keys().next().value);
+      }
+    }
+    return data || { ok: false, error_code: 502, description: "INVALID_TELEGRAM_RESPONSE" };
+  }
+
+  async #runDatabaseJavaScript(state, update) {
+    const javascript = this.#db(state)?.runtime?.javascript || {};
+    if (javascript.enabled !== true) return { enabled: false, actions: 0 };
+
+    const loader = this.env?.LOADER;
+    if (!loader || typeof loader.get !== "function") {
+      console.error(JSON.stringify({ event: "database_javascript_loader_unavailable" }));
+      return { enabled: true, actions: 0, error: "WORKER_LOADER_BINDING_MISSING" };
+    }
+
+    const toModuleSource = (value) => Array.isArray(value)
+      ? value.every((line) => typeof line === "string") ? value.join("\n") : ""
+      : typeof value === "string" ? value : "";
+    const source = toModuleSource(javascript.source);
+    const entrypointName = asText(javascript.entrypoint || "DatabaseScript");
+    const modules = { "database-script.js": source };
+    const extraModules = javascript.modules && typeof javascript.modules === "object" && !Array.isArray(javascript.modules)
+      ? javascript.modules : {};
+    let totalModuleBytes = new TextEncoder().encode(source).byteLength;
+    let validModules = Boolean(source) && source.length <= 256_000
+      && Object.keys(extraModules).length <= 32
+      && /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/.test(entrypointName);
+    for (const [moduleName, moduleSource] of Object.entries(extraModules)) {
+      const safeName = typeof moduleName === "string"
+        && /^[A-Za-z0-9_./-]+\.js$/.test(moduleName)
+        && !moduleName.split("/").includes("..")
+        && !moduleName.startsWith("/")
+        && moduleName !== "database-script.js";
+      const normalizedModuleSource = toModuleSource(moduleSource);
+      if (!safeName || !normalizedModuleSource) {
+        validModules = false;
         break;
       }
-      const parseFailure = !data?.ok && payload?.parse_mode && /can't parse entities|can't find end of the entity|unsupported start tag|unsupported end tag|entity.*not found/i.test(String(data?.description || ""));
-      if (parseFailure) {
-        const plainPayload = { ...payload };
-        delete plainPayload.parse_mode;
-        const response = await fetch(`${BOT_API}${botToken}/${method}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(plainPayload),
-          signal: AbortSignal.timeout(requestTimeoutMs),
-        });
-        data = await response.json().catch(() => null);
+      totalModuleBytes += new TextEncoder().encode(normalizedModuleSource).byteLength;
+      if (totalModuleBytes > 1_000_000) {
+        validModules = false;
+        break;
       }
-      if (data?.ok && useCache) {
-        const ttl = method === "getMe" ? 6 * 60 * 60_000 : method === "getChatMemberCount" ? 60_000 : 20_000;
-        this.telegramCache.set(cacheKey, { value: data, expiresAt: Date.now() + ttl });
-        if (this.telegramCache.size > 1_000) {
-          for (const [key, entry] of this.telegramCache) if (entry.expiresAt <= Date.now()) this.telegramCache.delete(key);
-          while (this.telegramCache.size > 800) this.telegramCache.delete(this.telegramCache.keys().next().value);
+      modules[moduleName] = normalizedModuleSource;
+    }
+    if (!validModules || totalModuleBytes > 1_000_000) {
+      console.error(JSON.stringify({ event: "database_javascript_config_invalid" }));
+      return { enabled: true, actions: 0, error: "DATABASE_JAVASCRIPT_CONFIG_INVALID" };
+    }
+
+    try {
+      const codeSignature = JSON.stringify({ entrypointName, modules: Object.entries(modules).sort(([a], [b]) => a.localeCompare(b)) });
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeSignature));
+      const codeHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      const workerId = `munitos-database-script:${codeHash}`;
+      const worker = loader.get(workerId, async () => ({
+        compatibilityDate: "2026-11-20",
+        compatibilityFlags: ["nodejs_compat"],
+        mainModule: "database-script.js",
+        modules,
+        // Database extensions cannot open arbitrary outbound network connections.
+        // Telegram requests are returned as actions and executed by the main Worker.
+        globalOutbound: null,
+      }));
+      const entrypoint = worker.getEntrypoint(entrypointName);
+      if (!entrypoint || typeof entrypoint.run !== "function") {
+        throw new Error(`DATABASE_SCRIPT_ENTRYPOINT_INVALID:${entrypointName}`);
+      }
+
+      const message = update?.message || update?.edited_message || update?.business_message
+        || update?.edited_business_message || update?.guest_message;
+      const callback = update?.callback_query;
+      const chat = message?.chat || callback?.message?.chat || update?.chat_member?.chat
+        || update?.my_chat_member?.chat || update?.chat_join_request?.chat || null;
+      const database = structuredClone(this.#db(state) || {});
+      const persistedScriptStorage = await this.ctx.storage.get("database-script:v1:state");
+      const scriptStorage = persistedScriptStorage && typeof persistedScriptStorage === "object" && !Array.isArray(persistedScriptStorage)
+        ? structuredClone(persistedScriptStorage) : {};
+      const result = await entrypoint.run({
+        update: structuredClone(update),
+        updateType: getTelegramUpdateType(update),
+        database,
+        storage: scriptStorage,
+        now: Date.now(),
+        bot: { ownerId: this.#ownerId(state), version: BUILD_VERSION },
+      });
+
+      const actions = Array.isArray(result) ? result : Array.isArray(result?.actions) ? result.actions : [];
+      if (actions.length > 20) throw new Error("DATABASE_SCRIPT_ACTION_LIMIT_EXCEEDED");
+      let completed = 0;
+      for (const action of actions) {
+        const method = asText(action?.method);
+        const parameters = action?.parameters ?? action?.params ?? {};
+        if (!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(method)
+          || !parameters || typeof parameters !== "object" || Array.isArray(parameters)) {
+          console.error(JSON.stringify({ event: "database_javascript_action_rejected", reason: "invalid_action_shape" }));
+          continue;
+        }
+        const targetChatId = parameters.chat_id ?? chat?.id;
+        const isTargetGroup = Boolean(action?.group === true || (chat && isGroup(chat)
+          && targetChatId != null && String(targetChatId) === String(chat.id)));
+        const options = {
+          group: isTargetGroup,
+          minIntervalMs: Number.isFinite(Number(action?.minIntervalMs))
+            ? clampNumber(action.minIntervalMs, isTargetGroup ? 3_500 : 1_000, 1_000, 4_000)
+            : undefined,
+        };
+        const response = await this.#telegram(state, method, parameters, options);
+        completed += 1;
+        if (!response?.ok) {
+          console.error(JSON.stringify({
+            event: "database_javascript_telegram_action_failed",
+            method,
+            errorCode: Number(response?.error_code || 0),
+            description: asText(response?.description || response?.error || "unknown").slice(0, 120),
+          }));
         }
       }
-      return data || { ok: false, error_code: 502, description: "INVALID_TELEGRAM_RESPONSE" };
+      if (result && !Array.isArray(result) && Object.prototype.hasOwnProperty.call(result, "storage")) {
+        if (result.storage === null) {
+          await this.ctx.storage.delete("database-script:v1:state");
+        } else {
+          const serializedStorage = JSON.stringify(result.storage);
+          if (!serializedStorage || serializedStorage.length > 256_000) {
+            throw new Error("DATABASE_SCRIPT_STORAGE_SIZE_LIMIT_EXCEEDED");
+          }
+          const nextStorage = JSON.parse(serializedStorage);
+          if (!nextStorage || typeof nextStorage !== "object" || Array.isArray(nextStorage)
+            || Object.keys(nextStorage).length > 500) {
+            throw new Error("DATABASE_SCRIPT_STORAGE_SHAPE_INVALID");
+          }
+          await this.ctx.storage.put("database-script:v1:state", nextStorage);
+        }
+      }
+      return { enabled: true, actions: completed };
     } catch (error) {
-      const safeError = asText(error?.message || error)
-        .replaceAll(botToken, "[redacted]")
-        .replace(/https?:\/\/api\.telegram\.org\/[^\s]+/gi, "[telegram-api-url]")
-        .slice(0, 120);
-      return { ok: false, description: `NETWORK_ERROR:${safeError}` };
+      console.error(JSON.stringify({
+        event: "database_javascript_execution_failed",
+        error: asText(error?.message || error).slice(0, 220),
+      }));
+      return { enabled: true, actions: 0, error: asText(error?.message || error).slice(0, 160) };
     }
   }
 
@@ -1330,11 +1689,11 @@ class ForwardSchedulerRuntime {
     const databaseInstalled = Boolean(this.#db(state));
     return {
       inline_keyboard: [
-        [button(`Cache: ${cacheEnabled ? "ON" : "OFF"}`, "settings:toggle:cache", cacheEnabled ? "success" : "danger")],
-        [button(`Auto Update: ${autoUpdate ? "ON" : "OFF"}`, "settings:toggle:auto", autoUpdate ? "success" : "danger")],
+        [toggleButton("Cache", cacheEnabled, "settings:toggle:cache")],
+        [toggleButton("Auto Update", autoUpdate, "settings:toggle:auto")],
         [button("Clear Cache", "settings:clear-cache", "primary")],
         [button(databaseInstalled ? "Replace Database" : "Install Database", "settings:install", "success"), button("Delete Database", "settings:delete", "danger")],
-        [button(botEnabled ? "Shutdown Bot" : "Enable Bot", "settings:toggle:bot", botEnabled ? "danger" : "success")],
+        [toggleButton("Bot", botEnabled, "settings:toggle:bot")],
       ],
     };
   }
@@ -1469,7 +1828,7 @@ class ForwardSchedulerRuntime {
       await this.#telegram(state, "editMessageText", {
         chat_id: chatId,
         message_id: callback.message.message_id,
-        text: "DATABASE INSTALLATION\n\nUpload your database file as a Telegram document. Supported filenames: database.js or database.json. The file must contain data-only JSON (or `export default { ... }`).",
+        text: "DATABASE INSTALLATION\n\nUpload only database.json. Runtime settings and JavaScript module code are stored in that file. Set runtime.javascript.enabled to true to enable the database module. The Worker Loader binding is configured once in wrangler.toml; Telegram API actions are executed by the main Worker through its shared API gateway. Do not upload a separate JavaScript database file.",
         reply_markup: { inline_keyboard: [[button("Back to Settings", "settings:refresh", "primary")]] },
       }, { bypassLocalRate: true });
       return;
@@ -1732,8 +2091,8 @@ class ForwardSchedulerRuntime {
     const document = message?.document;
     const chatId = message?.chat?.id || this.#ownerId(state);
     const filename = asText(document?.file_name).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 128).toLowerCase();
-    if (!document?.file_id || !["database.js", "database.json"].includes(filename)) {
-      await this.#send(chatId, "Invalid file. Upload a Telegram document named database.js or database.json.", state);
+    if (!document?.file_id || filename !== "database.json") {
+      await this.#send(chatId, "Invalid file. Upload a Telegram document named database.json.", state);
       return;
     }
     const declaredSize = Number(document.file_size || 0);
@@ -1778,15 +2137,15 @@ class ForwardSchedulerRuntime {
     }
   }
 
-  async #installDatabaseSource(state, source, filename = "database.js") {
+  async #installDatabaseSource(state, source, filename = "database.json") {
     const safeFilename = String(filename || "").toLowerCase();
     let database;
     let manifest;
     let resourceReport = { created: 0, updated: 0, removed: 0, retained: 0 };
     const sourceText = String(source ?? "");
     const sourceBytes = new TextEncoder().encode(sourceText);
-    if (!["database.js", "database.json"].includes(safeFilename)) {
-      await this.#send(this.#ownerId(state), "Database filename must be database.js or database.json.", state);
+    if (safeFilename !== "database.json") {
+      await this.#send(this.#ownerId(state), "Database filename must be database.json.", state);
       return false;
     }
     if (!sourceText || sourceBytes.byteLength > MAX_DATABASE_BYTES) {
@@ -1797,7 +2156,7 @@ class ForwardSchedulerRuntime {
     let newHash = "";
     const previousManifest = await this.ctx.storage.get("database:v1:manifest");
     try {
-      database = parseDatabaseModule(sourceText);
+      database = parseDatabaseConfig(sourceText);
       const digest = await crypto.subtle.digest("SHA-256", sourceBytes);
       newHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
       manifest = await this.#storeDatabaseChunks(sourceText, newHash, safeFilename);
@@ -1831,7 +2190,9 @@ class ForwardSchedulerRuntime {
       const reason = code === "database_size_invalid" ? "The file exceeds the supported download size."
         : code.startsWith("resource_") ? "A database resource configuration is outside the supported storage limits."
           : code === "DATABASE_STORAGE_CHUNK_MISSING" || code === "DATABASE_STORAGE_HASH_MISMATCH" ? "The uploaded data could not be verified after storage."
-            : "The database schema or data-only JSON structure is invalid.";
+            : code.startsWith("database_config_executable_expression_not_supported")
+              ? "The database contains an unsupported executable expression. Keep configuration values as JSON data and place JavaScript module code in runtime.javascript.source."
+              : "The database schema or supported JSON-plus-JavaScript data syntax is invalid.";
       console.error("Database installation rejected", code.slice(0, 120));
       await this.#send(this.#ownerId(state), `Database installation failed: ${reason} The previously installed database remains active.`, state);
       return false;
@@ -1920,17 +2281,22 @@ class ForwardSchedulerRuntime {
       const parts = data.split(":");
       const action = data.startsWith("g5:") ? parts[1] : parts[2];
       const targetChatId = data.startsWith("g5:") ? parts[2] : parts[3];
-      if (String(targetChatId) !== chatId || !["on", "off"].includes(action)) {
+      if (String(targetChatId) !== chatId || !["on", "off", "toggle"].includes(action)) {
         await this.#answerCallback(callback.id, "This button belongs to another group.");
         return;
       }
       state.groupSettings[chatId] ||= {};
-      state.groupSettings[chatId].botEnabled = action === "on";
+      const current = state.groupSettings[chatId].botEnabled !== false;
+      const next = action === "toggle" ? !current : action === "on";
+      state.groupSettings[chatId].botEnabled = next;
       await this.#save(state);
-      await this.#answerCallback(callback.id, action === "on" ? "Bot replies enabled." : "Bot replies disabled.");
-      await this.#send(chat.id, this.#text(state, action === "on" ? "group.botOn" : "group.botOff", action === "on" ? "Bot replies are now enabled." : "Bot replies are now disabled."), state, {
-        reply_markup: { inline_keyboard: [[button("Enable", `g5:on:${chatId}`, "success"), button("Disable", `g5:off:${chatId}`, "danger")]] },
-      }, { bypassLocalRate: true, group: true });
+      await this.#answerCallback(callback.id, next ? "Bot replies enabled." : "Bot replies disabled.");
+      await this.#telegram(state, "editMessageText", {
+        chat_id: chat.id,
+        message_id: callback.message.message_id,
+        text: `Quick controls\nBot replies: ${next ? "ON" : "OFF"}`,
+        reply_markup: { inline_keyboard: [[toggleButton("Bot replies", next, `g5:toggle:${chatId}`)]] },
+      }, { bypassLocalRate: true });
       return;
     }
     const parts = data.split(":");
@@ -2239,6 +2605,104 @@ class ForwardSchedulerRuntime {
     state.knownMembers[chatId] = list.slice(-max);
   }
 
+  #markMemberJoined(state, chat, member) {
+    if (!isGroup(chat) || !member?.id || member.is_bot) return false;
+    state.memberStates ||= {};
+    const key = `${String(chat.id)}:${String(member.id)}`;
+    const previous = state.memberStates[key];
+    if (previous?.status === "member") return false;
+    state.memberStates[key] = { status: "member", updatedAt: Date.now() };
+    const entries = Object.entries(state.memberStates);
+    if (entries.length > 20_000) {
+      entries.sort((a, b) => Number(a[1]?.updatedAt || 0) - Number(b[1]?.updatedAt || 0));
+      state.memberStates = Object.fromEntries(entries.slice(-16_000));
+    }
+    return true;
+  }
+
+  #markMemberLeft(state, chat, member) {
+    if (!isGroup(chat) || !member?.id || member.is_bot) return false;
+    state.memberStates ||= {};
+    const chatId = String(chat.id);
+    const userId = String(member.id);
+    const key = `${chatId}:${userId}`;
+    const previous = state.memberStates[key];
+    const transitioned = previous?.status !== "left";
+    state.memberStates[key] = { status: "left", updatedAt: Date.now() };
+    delete state.welcomeDelivered[key];
+    delete state.welcomeDedup[key];
+    state.welcomeQueue = (state.welcomeQueue || []).filter((item) =>
+      !(String(item.chatId) === chatId && String(item.member?.id) === userId));
+    delete state.pendingVerifications[key];
+    return transitioned;
+  }
+
+  #renderGoodbye(state, chat, member) {
+    const fullName = [member?.first_name, member?.last_name].filter(Boolean).join(" ") || String(member?.id || "User");
+    const mention = member?.id
+      ? `<a href="tg://user?id=${Number(member.id)}">${escapeHtml(fullName)}</a>`
+      : escapeHtml(fullName);
+    const date = new Intl.DateTimeFormat("fa-IR", { timeZone: "Asia/Tehran", dateStyle: "long" }).format(new Date());
+    const time = new Intl.DateTimeFormat("fa-IR", { timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit" }).format(new Date());
+    const values = {
+      name: escapeHtml(fullName),
+      user: escapeHtml(fullName),
+      mention,
+      firstname: escapeHtml(member?.first_name || ""),
+      lastname: escapeHtml(member?.last_name || ""),
+      username: member?.username ? `@${escapeHtml(member.username)}` : "",
+      userid: escapeHtml(member?.id || ""),
+      groupname: escapeHtml(chat?.title || "Group"),
+      date: escapeHtml(date),
+      time: escapeHtml(time),
+    };
+    const feature = this.#db(state)?.features?.goodbye || {};
+    const groupSettings = state.groupSettings[String(chat?.id)] || {};
+    let rendered = renderTemplate(groupSettings.goodbyeText || feature.text || "👋 خداحافظ !mention", values);
+    const tokens = {
+      "!mention": values.mention, "منشن_کاربر": values.mention,
+      "!firstname": values.firstname, "نام_کاربر": values.firstname,
+      "!lastname": values.lastname, "فامیل_کاربر": values.lastname,
+      "!username": values.username, "آیدی_کاربر": values.username,
+      "!userid": values.userid, "آیدی_عددی_کاربر": values.userid,
+      "!groupname": values.groupname, "نام_گروه": values.groupname,
+      "!date": values.date, "زمان_تاریخ": values.date,
+      "!time": values.time, "زمان_ساعت": values.time,
+    };
+    for (const [token, value] of Object.entries(tokens)) rendered = rendered.split(token).join(value);
+    return rendered;
+  }
+
+  async #sendGoodbye(state, chat, member) {
+    if (!this.#featureEnabled(state, "goodbye", chat?.id)) return;
+    const chatId = String(chat.id);
+    const text = this.#renderGoodbye(state, chat, member);
+    const media = state.groupSettings[chatId]?.goodbyeMedia || this.#db(state)?.features?.goodbye?.media || null;
+    let delivered = false;
+    if (media?.fileId && ["photo", "video", "audio", "voice", "animation", "sticker", "video_note"].includes(media.type)) {
+      const field = media.type === "video_note" ? "video_note" : media.type;
+      const method = media.type === "video_note" ? "sendVideoNote" : media.type === "sticker" ? "sendSticker" : media.type === "animation" ? "sendAnimation" : media.type === "voice" ? "sendVoice" : media.type === "audio" ? "sendAudio" : media.type === "video" ? "sendVideo" : "sendPhoto";
+      const captionSupported = !["sticker", "video_note"].includes(media.type);
+      const payload = { chat_id: Number(chat.id), [field]: media.fileId };
+      if (captionSupported && text.length <= 950) {
+        payload.caption = text;
+        payload.parse_mode = this.#db(state)?.runtime?.telegram?.parseMode || "HTML";
+      }
+      const sent = await this.#telegram(state, method, payload, { group: true });
+      delivered = Boolean(sent.ok);
+      if (delivered && (!captionSupported || text.length > 950)) {
+        const textSent = await this.#send(chat.id, text, state, {}, { group: true });
+        delivered = Boolean(textSent.ok);
+      }
+    } else {
+      const sent = await this.#send(chat.id, text, state, {}, { group: true });
+      delivered = Boolean(sent.ok);
+    }
+    if (!delivered) {
+      console.error(JSON.stringify({ event: "goodbye_message_failed", chatId, userId: String(member?.id || ""), reason: "TELEGRAM_DELIVERY_FAILED" }));
+    }
+  }
+
   async #handlePrivateMessage(state, message) {
     const user = message.from || {};
     const chat = message.chat || {};
@@ -2251,7 +2715,7 @@ class ForwardSchedulerRuntime {
         state.flow = "database_upload";
         await this.#save(state);
         await this.#send(chat.id,
-          "DATABASE INSTALLATION\n\nUpload your database file as a Telegram document. Supported filenames: database.js or database.json. The file must contain data-only JSON (or `export default { ... }`).",
+          "DATABASE INSTALLATION\n\nUpload only database.json. Runtime settings and JavaScript module code are stored in that file. Set runtime.javascript.enabled to true to enable the database module. The Worker Loader binding is configured once in wrangler.toml; Telegram API actions are executed by the main Worker through its shared API gateway. Do not upload a separate JavaScript database file.",
           state,
         );
         return;
@@ -2343,11 +2807,19 @@ class ForwardSchedulerRuntime {
     const members = (message.new_chat_members || []).filter((member) => {
       if (!member || member.is_bot || !member.id) return false;
       const key = `${chatId}:${member.id}`;
-      const last = Number(dedup[key] || 0);
-      const duplicate = now - last < 60_000;
-      const inviteRetryForWelcome = inviteSource && !state.welcomeDelivered?.[key];
-      if (duplicate && !inviteRetryForWelcome) return false;
-      if (!duplicate) dedup[key] = now;
+      const lastJoinAt = Number(dedup[key] || 0);
+      const recentJoinEvent = lastJoinAt > 0 && now - lastJoinAt < 1_500;
+      const alreadyQueued = (state.welcomeQueue || []).some((item) =>
+        String(item.chatId) === chatId && String(item.member?.id) === String(member.id));
+      // A second Telegram update type can describe the same join. Deduplicate only
+      // that short cross-update window; stale delivered/queued state is reset so a
+      // later real re-join receives a fresh welcome even if the leave update was missed.
+      if (recentJoinEvent && (state.welcomeDelivered?.[key] || alreadyQueued)) return false;
+      state.welcomeQueue = (state.welcomeQueue || []).filter((item) =>
+        !(String(item.chatId) === chatId && String(item.member?.id) === String(member.id)));
+      delete state.welcomeDelivered[key];
+      this.#markMemberJoined(state, message.chat, member);
+      dedup[key] = now;
       return true;
     });
     for (const [key, stamp] of Object.entries(dedup)) if (now - Number(stamp || 0) > 3_600_000) delete dedup[key];
@@ -2418,7 +2890,7 @@ class ForwardSchedulerRuntime {
         }
       }
       const welcomeKey = `${chatId}:${member.id}`;
-      const inviteOnly = welcomeFeature.onlyViaInviteLink !== false;
+      const inviteOnly = welcomeFeature.onlyViaInviteLink === true;
       const hasInviteSource = Boolean(joinContext.inviteLink || joinContext.viaChatFolderInviteLink || joinContext.viaJoinRequest);
       const alreadyQueued = (state.welcomeQueue || []).some((item) => String(item.chatId) === chatId && String(item.member?.id) === String(member.id));
       if (this.#featureEnabled(state, "welcome", chatId) && (!inviteOnly || hasInviteSource) && !state.welcomeDelivered[welcomeKey] && !alreadyQueued) {
@@ -2658,9 +3130,19 @@ class ForwardSchedulerRuntime {
       if (!section) return this.#send(chatId, "بخش موردنظر پیدا نشد.", state);
       text = `<b>${escapeHtml(section.title || "راهنما")}</b>\n━━━━━━━━━━━━━━\n${escapeHtml(section.description || "")}`;
       const rows = [];
+      const renderedToggles = new Set();
+      const groupChat = Number(chatId) < 0;
       for (const id of section.commands || []) {
         const item = commands.get(String(id));
         if (!item) continue;
+        const featureId = String(item.toggleFeature || "");
+        if (featureId && groupChat) {
+          if (renderedToggles.has(featureId)) continue;
+          renderedToggles.add(featureId);
+          const enabled = this.#featureEnabled(state, featureId, chatId);
+          rows.push(toggleButton(item.toggleLabel || item.title || item.labelFa || featureId, enabled, `help:toggle:${featureId}:${section.id}`));
+          continue;
+        }
         rows.push(button(String(item.buttonLabel || item.title || item.labelFa || item.id).slice(0, 60), `help:command:${item.id}:${section.id}`, item.color || "primary"));
       }
       for (let index = 0; index < rows.length; index += 2) keyboard.push(rows.slice(index, index + 2));
@@ -2683,9 +3165,40 @@ class ForwardSchedulerRuntime {
 
   async #handleHelpCallback(state, callback) {
     const data = asText(callback.data);
-    const chatId = callback.message?.chat?.id;
+    const chat = callback.message?.chat;
+    const chatId = chat?.id;
+    if (!chatId || !callback.message?.message_id) {
+      await this.#answerCallback(callback.id);
+      return;
+    }
+    if (data.startsWith("help:toggle:")) {
+      const [, , featureId, sectionId] = data.split(":");
+      const db = this.#db(state);
+      const configured = (db?.commands || []).some((item) =>
+        databaseCommandEnabled(item, db) && String(item.toggleFeature || "") === featureId);
+      if (!isGroup(chat) || !configured || !getFeatureModule(featureId)) {
+        await this.#answerCallback(callback.id, "این کلید در این گفتگو قابل استفاده نیست.");
+        return;
+      }
+      const userId = String(callback.from?.id || "");
+      const allowed = this.#isOwner(userId, state) || await this.#isTelegramAdmin(state, userId, chatId);
+      if (!allowed) {
+        await this.#answerCallback(callback.id, this.#text(state, "group.adminOnly", "⛔ این دکمه فقط برای مدیران گروه فعال است."));
+        return;
+      }
+      if (!isModuleEnabled(db, featureId)) {
+        await this.#answerCallback(callback.id, "این قابلیت در دیتابیس به‌صورت سراسری غیرفعال است.");
+        return this.#sendHelp(state, chatId, sectionId || "", "", callback.message.message_id);
+      }
+      const current = this.#featureEnabled(state, featureId, chatId);
+      const next = !current;
+      state.groupModuleOverrides[String(chatId)] ||= {};
+      state.groupModuleOverrides[String(chatId)][featureId] = next;
+      await this.#save(state);
+      await this.#answerCallback(callback.id, next ? "قابلیت فعال شد." : "قابلیت غیرفعال شد.");
+      return this.#sendHelp(state, chatId, sectionId || "", "", callback.message.message_id);
+    }
     await this.#answerCallback(callback.id);
-    if (!chatId || !callback.message?.message_id) return;
     if (data === "help:home") return this.#sendHelp(state, chatId, "", "", callback.message.message_id);
     if (data.startsWith("help:section:")) return this.#sendHelp(state, chatId, data.slice("help:section:".length), "", callback.message.message_id);
     if (data.startsWith("help:command:")) {
@@ -2908,6 +3421,56 @@ class ForwardSchedulerRuntime {
     return true;
   }
 
+  async #handleGoodbyeCommand(state, message, definition, argumentText) {
+    const chatId = String(message.chat.id);
+    const handler = String(definition.handler);
+    if (!isModuleEnabled(this.#db(state), "goodbye")) {
+      await this.#reply(message, "⛔ قابلیت پیام خداحافظی در دیتابیس غیرفعال است.", state);
+      return true;
+    }
+    const operator = this.#isOwner(message.from?.id, state) || await this.#isTelegramAdmin(state, message.from?.id, message.chat.id);
+    if (!operator) {
+      await this.#reply(message, this.#text(state, "group.adminOnly", "⛔ این دستور فقط برای مدیران گروه است."), state);
+      return true;
+    }
+    const settings = state.groupSettings[chatId] ||= {};
+    if (handler === "goodbye.on" || handler === "goodbye.off") {
+      state.groupModuleOverrides[chatId] ||= {};
+      state.groupModuleOverrides[chatId].goodbye = handler === "goodbye.on";
+      await this.#save(state);
+      await this.#reply(message, handler === "goodbye.on" ? "🟢 <b>پیام خداحافظی فعال شد.</b>" : "🔴 <b>پیام خداحافظی غیرفعال شد.</b>", state);
+    } else if (handler === "goodbye.set") {
+      const value = asText(argumentText || message.reply_to_message?.text || message.reply_to_message?.caption);
+      if (!value) {
+        await this.#reply(message, "✍️ متن جدید را بعد از دستور تنظیم خداحافظی بنویسید یا روی متن موردنظر ریپلای کنید.", state);
+        return true;
+      }
+      settings.goodbyeText = value.slice(0, 3_500);
+      await this.#save(state);
+      await this.#reply(message, "✅ متن خداحافظی این گروه ذخیره شد.", state);
+    } else if (handler === "goodbye.get") {
+      const value = settings.goodbyeText || this.#db(state).features.goodbye.text || "👋 خداحافظ !mention";
+      const media = settings.goodbyeMedia ? `\n🖼 رسانه: <b>${escapeHtml(settings.goodbyeMedia.type)}</b>` : "\n🖼 رسانه: <i>تنظیم نشده</i>";
+      await this.#reply(message, `<b>متن خداحافظی فعلی:</b>\n${escapeHtml(value)}${media}`, state);
+    } else if (handler === "goodbye.reset") {
+      delete settings.goodbyeText;
+      delete settings.goodbyeMedia;
+      await this.#save(state);
+      await this.#reply(message, "✅ تنظیمات خداحافظی به مقادیر پیش‌فرض دیتابیس بازگشت.", state);
+    } else if (handler === "goodbye.set_media") {
+      const source = message.reply_to_message || message;
+      const media = getWelcomeMediaFromMessage(source);
+      if (!media?.fileId) {
+        await this.#reply(message, "⚠️ دستور را روی عکس، ویدئو، آهنگ، ویس، گیف، استیکر یا ویدئوی سلفی ریپلای کنید؛ یا دستور را به‌عنوان کپشن همان رسانه بفرستید.", state);
+        return true;
+      }
+      settings.goodbyeMedia = media;
+      await this.#save(state);
+      await this.#reply(message, `✅ رسانه خداحافظی ذخیره شد: <b>${escapeHtml(media.type)}</b>`, state);
+    }
+    return true;
+  }
+
   async #handleDatabaseCommand(state, message, db) {
     const match = matchDatabaseCommand(message.text || message.caption || "", db);
     if (!match) return false;
@@ -2919,6 +3482,7 @@ class ForwardSchedulerRuntime {
     }
     if (handler === "profile.info") return this.#handleProfileInfo(state, message, match.argumentText);
     if (handler.startsWith("welcome.")) return this.#handleWelcomeCommand(state, message, definition, match.argumentText);
+    if (handler.startsWith("goodbye.")) return this.#handleGoodbyeCommand(state, message, definition, match.argumentText);
     if (handler.startsWith("moderation.")) {
       if (!this.#featureEnabled(state, "moderation", message.chat.id)) {
         await this.#reply(message, "⛔ مدیریت گروه در دیتابیس غیرفعال است.", state);
@@ -3213,7 +3777,6 @@ class ForwardSchedulerRuntime {
     ].map(String);
     const trustedSender = operator || protectedSenderIds.includes(String(user.id));
 
-    if (message.new_chat_members?.length) await this.#handleNewMembers(state, message);
     if (await this.#handleDatabaseCommand(state, message, db)) return;
 
     const command = parseCommand(text);
@@ -3243,7 +3806,9 @@ class ForwardSchedulerRuntime {
       settings.botEnabled = action === "on";
       await this.#save(state);
       await this.#reply(message, this.#text(state, action === "on" ? "group.botOn" : "group.botOff", action === "on" ? "Bot replies are now enabled." : "Bot replies are now disabled."), state);
-      await this.#send(chat.id, "Quick controls:", state, { reply_markup: { inline_keyboard: [[button("🟢 ON", `g5:on:${groupKey}`, "success"), button("🔴 OFF", `g5:off:${groupKey}`, "danger")]] } }, { bypassLocalRate: true, group: true });
+      await this.#send(chat.id, `Quick controls\nBot replies: ${settings.botEnabled === false ? "OFF" : "ON"}`, state, {
+        reply_markup: { inline_keyboard: [[toggleButton("Bot replies", settings.botEnabled !== false, `g5:toggle:${groupKey}`)]] },
+      }, { bypassLocalRate: true, group: true });
       return;
     }
     if ((tagOptOutCommand && command?.command === tagOptOutCommand)
@@ -3557,6 +4122,7 @@ class ForwardSchedulerRuntime {
       return;
     }
     await this.#save(state);
+    await this.#runDatabaseJavaScript(state, update);
 
     if (callback) {
       const callbackData = asText(callback.data);
@@ -3644,14 +4210,9 @@ class ForwardSchedulerRuntime {
       const newMember = memberUpdate.new_chat_member || {};
       if (["left", "kicked"].includes(newMember.status) && ["member", "restricted", "administrator", "creator"].includes(oldStatus)) {
         const departedUserId = String(newMember.user?.id || "");
-        const departedKey = `${String(chat.id)}:${departedUserId}`;
-        if (departedUserId) {
-          delete state.welcomeDelivered[departedKey];
-          delete state.welcomeDedup[departedKey];
-          state.welcomeQueue = (state.welcomeQueue || []).filter((item) => !(String(item.chatId) === String(chat.id) && String(item.member?.id) === departedUserId));
-        }
+        const transitioned = this.#markMemberLeft(state, chat, newMember.user);
         const anti = this.#db(state)?.features?.antiSpam || {};
-        if (anti.signals?.joinLeaveBurst !== false) {
+        if (transitioned && anti.signals?.joinLeaveBurst !== false) {
           const now = Date.now();
           const windowSeconds = clampNumber(anti.raid?.windowSeconds, 60, 10, 600);
           const leaves = (state.leaveWindows[String(chat.id)] || []).filter((item) => now - Number(item.at || 0) <= windowSeconds * 1_000);
@@ -3674,11 +4235,8 @@ class ForwardSchedulerRuntime {
             });
           }
         }
-        if (this.#featureEnabled(state, "goodbye", chat.id)) {
-          const goodbye = this.#db(state)?.features?.goodbye || {};
-          await this.#send(chat.id, renderTemplate(goodbye.text || "👋 {name} left the group.", { name: userDisplay(newMember.user) }), state, {}, { group: true });
-        }
-      } else if (["member", "restricted"].includes(newMember.status) && ["left", "kicked"].includes(oldStatus)) {
+        if (transitioned) await this.#sendGoodbye(state, chat, newMember.user);
+      } else if (["member", "restricted", "administrator", "creator"].includes(newMember.status) && ["left", "kicked"].includes(oldStatus)) {
         const joinedUserId = String(newMember.user?.id || "");
         const savedBan = state.groupModerationLists?.[String(chat.id)]?.banned?.[joinedUserId];
         if (savedBan && joinedUserId) {
@@ -3686,11 +4244,25 @@ class ForwardSchedulerRuntime {
           console.log(JSON.stringify({ event: "persistent_group_ban_reapplied", chatId: String(chat.id), userId: joinedUserId, ok: Boolean(reban.ok) }));
           await this.#save(state);
         } else {
-          await this.#handleNewMembers(state, { chat, new_chat_members: [newMember.user].filter(Boolean) }, {
-            inviteLink: memberUpdate.invite_link?.invite_link || "",
-            viaChatFolderInviteLink: Boolean(memberUpdate.via_chat_folder_invite_link),
-            viaJoinRequest: Boolean(memberUpdate.via_join_request),
-          });
+          const welcomeKey = `${String(chat.id)}:${joinedUserId}`;
+          const lastJoinAt = Number(state.welcomeDedup?.[welcomeKey] || 0);
+          const recentMessageJoin = lastJoinAt > 0 && Date.now() - lastJoinAt < 1_500
+            && ((state.welcomeQueue || []).some((item) => String(item.chatId) === String(chat.id)
+              && String(item.member?.id) === joinedUserId) || Boolean(state.welcomeDelivered?.[welcomeKey]));
+          if (recentMessageJoin) {
+            // The service message already handled this same join. Keep its delivery state.
+            this.#markMemberJoined(state, chat, newMember.user);
+            await this.#save(state);
+          } else {
+            // Telegram's old_status is authoritative. Clear stale delivery/member state
+            // even when the leave update was missed while the Worker was unavailable.
+            this.#markMemberLeft(state, chat, newMember.user);
+            await this.#handleNewMembers(state, { chat, new_chat_members: [newMember.user].filter(Boolean) }, {
+              inviteLink: memberUpdate.invite_link?.invite_link || "",
+              viaChatFolderInviteLink: Boolean(memberUpdate.via_chat_folder_invite_link),
+              viaJoinRequest: Boolean(memberUpdate.via_join_request),
+            });
+          }
         }
       }
     } else if (update?.chat_join_request) {
@@ -3717,6 +4289,12 @@ class ForwardSchedulerRuntime {
                 chatbotEnabled: this.#db(state)?.groupSettings?.defaultChatbotEnabled !== false,
               };
             }
+            if (message.left_chat_member) {
+              const departed = message.left_chat_member;
+              const transitioned = this.#markMemberLeft(state, chat, departed);
+              if (transitioned) await this.#sendGoodbye(state, chat, departed);
+            }
+            if (message.new_chat_members?.length) await this.#handleNewMembers(state, message);
             await this.#handleGroupMessage(state, { ...message, update_id: updateId });
             state.groupUsage[groupId] = Math.max(0, Number(state.groupUsage[groupId] || 0)) + 1;
             await this.#save(state);
@@ -3988,10 +4566,7 @@ class ForwardSchedulerRuntime {
 export class ForwardScheduler extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    const runtimeEnv = Object.create(env || null);
-    runtimeEnv.EMBEDDED_BOT_TOKEN = EMBEDDED_BOT_TOKEN;
-    runtimeEnv.OWNER_TELEGRAM_ID = EMBEDDED_OWNER_TELEGRAM_ID;
-    this.runtime = new ForwardSchedulerRuntime(ctx, runtimeEnv);
+    this.runtime = new ForwardSchedulerRuntime(ctx, env || {});
   }
 
   handleUpdate(update) { return this.runtime.handleUpdate(update); }
@@ -4078,26 +4653,19 @@ function jsonResponse(value, status = 200) {
   });
 }
 
-async function telegramControlApi(method, payload = {}) {
-  const response = await fetch(`${BOT_API}${EMBEDDED_BOT_TOKEN}/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(12_000),
-  });
-  const data = await response.json().catch(() => null);
-  if (!data || typeof data.ok !== "boolean") {
-    throw new Error(`TELEGRAM_${method.toUpperCase()}_INVALID_RESPONSE_HTTP_${response.status}`);
-  }
-  if (!data.ok) {
-    const description = String(data.description || `HTTP_${response.status}`).replaceAll(EMBEDDED_BOT_TOKEN, "[redacted]").slice(0, 180);
+async function telegramControlApi(env, method, payload = {}) {
+  const data = await requestTelegramApi(env, method, payload, { timeoutMs: TELEGRAM_TIMEOUT_MS });
+  if (!data?.ok) {
+    const description = redactBotToken(data?.description || `HTTP_${data?.error_code || 502}`, env).slice(0, 180);
     throw new Error(`TELEGRAM_${method.toUpperCase()}_FAILED:${description}`);
   }
   return data.result;
 }
 
-async function syncTelegramCommands(force = false) {
-  const ownerScope = { type: "chat", chat_id: Number(EMBEDDED_OWNER_TELEGRAM_ID) };
+async function syncTelegramCommands(env, force = false) {
+  const ownerId = ownerIdFrom(env);
+  if (!ownerId) throw new Error("OWNER_TELEGRAM_ID_MISSING_OR_INVALID");
+  const ownerScope = { type: "chat", chat_id: Number(ownerId) };
   if (force) {
     const scopes = [
       null,
@@ -4106,40 +4674,46 @@ async function syncTelegramCommands(force = false) {
       ownerScope,
     ];
     for (const scope of scopes) {
-      await telegramControlApi("deleteMyCommands", scope ? { scope } : {});
+      await telegramControlApi(env, "deleteMyCommands", scope ? { scope } : {});
     }
   }
-  const existing = await telegramControlApi("getMyCommands", { scope: ownerScope });
+  const existing = await telegramControlApi(env, "getMyCommands", { scope: ownerScope });
   const correct = Array.isArray(existing) && existing.length === 1
     && existing[0]?.command === "settings";
   if (force || !correct) {
-    await telegramControlApi("setMyCommands", {
+    await telegramControlApi(env, "setMyCommands", {
       scope: ownerScope,
       commands: [{ command: "settings", description: "Open owner settings" }],
     });
   }
 }
 
-async function ensureTelegramIntegration(force = false) {
-  const me = await telegramControlApi("getMe");
+async function ensureTelegramIntegration(env, force = false) {
+  const webhookUrl = webhookUrlFrom(env);
+  const webhookSecret = webhookSecretFrom(env);
+  if (!webhookUrl || !/^https:\/\//i.test(webhookUrl)) throw new Error("WEBHOOK_URL_MISSING_OR_INVALID");
+  if (!webhookSecret || webhookSecret.length < 16) throw new Error("WEBHOOK_SECRET_MISSING_OR_INVALID");
+  if (!ownerIdFrom(env)) throw new Error("OWNER_TELEGRAM_ID_MISSING_OR_INVALID");
+
+  const me = await telegramControlApi(env, "getMe");
   if (!me?.id || !me?.is_bot) throw new Error("TELEGRAM_GET_ME_INVALID_RESULT");
-  const current = await telegramControlApi("getWebhookInfo");
+  const current = await telegramControlApi(env, "getWebhookInfo");
   const currentAllowed = Array.isArray(current?.allowed_updates) ? [...current.allowed_updates].sort() : [];
   const expectedAllowed = [...TELEGRAM_UPDATE_TYPES].sort();
-  const needsWebhookUpdate = force || current?.url !== WEBHOOK_URL
+  const needsWebhookUpdate = force || current?.url !== webhookUrl
     || JSON.stringify(currentAllowed) !== JSON.stringify(expectedAllowed);
   if (needsWebhookUpdate) {
-    await telegramControlApi("setWebhook", {
-      url: WEBHOOK_URL,
-      secret_token: WEBHOOK_SECRET,
+    await telegramControlApi(env, "setWebhook", {
+      url: webhookUrl,
+      secret_token: webhookSecret,
       max_connections: WEBHOOK_MAX_CONNECTIONS,
       allowed_updates: TELEGRAM_UPDATE_TYPES,
       drop_pending_updates: false,
     });
   }
-  await syncTelegramCommands(force);
-  const verified = await telegramControlApi("getWebhookInfo");
-  if (verified?.url !== WEBHOOK_URL) throw new Error("TELEGRAM_WEBHOOK_VERIFICATION_FAILED");
+  await syncTelegramCommands(env, force);
+  const verified = await telegramControlApi(env, "getWebhookInfo");
+  if (verified?.url !== webhookUrl) throw new Error("TELEGRAM_WEBHOOK_VERIFICATION_FAILED");
   return {
     ok: true,
     botId: me.id,
@@ -4163,12 +4737,12 @@ async function runScheduledBootstrap(env, reason = "cron") {
       console.log(JSON.stringify({ event: "telegram_integration_bootstrap_skipped", reason, skipReason: claim?.reason || "interval" }));
       return { skipped: true, reason: claim?.reason || "interval" };
     }
-    const result = await ensureTelegramIntegration(Boolean(claim.force));
+    const result = await ensureTelegramIntegration(env, Boolean(claim.force));
     await stub.finishIntegrationCheck({ ...result, checkedAt: Date.now(), version: BUILD_VERSION });
     console.log(JSON.stringify({ event: "telegram_integration_ready", reason, ...result }));
     return result;
   } catch (error) {
-    const message = String(error?.message || error).replaceAll(EMBEDDED_BOT_TOKEN, "[redacted]").slice(0, 220);
+    const message = redactBotToken(error, env).slice(0, 220);
     if (stub) {
       try {
         await stub.finishIntegrationCheck({ ok: false, checkedAt: Date.now(), version: BUILD_VERSION, error: message });
@@ -4188,12 +4762,12 @@ async function repairTelegramIntegrationFromHealth(env) {
   console.log(JSON.stringify({ event: "telegram_healthcheck_bootstrap_started", reason }));
   try {
     stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
-    const result = await ensureTelegramIntegration(true);
+    const result = await ensureTelegramIntegration(env, true);
     await stub.finishIntegrationCheck({ ...result, checkedAt: Date.now(), version: BUILD_VERSION });
     console.log(JSON.stringify({ event: "telegram_healthcheck_bootstrap_ready", durationMs: Date.now() - startedAt, ...result }));
     return { ok: true, ...result };
   } catch (error) {
-    const message = String(error?.message || error).replaceAll(EMBEDDED_BOT_TOKEN, "[redacted]").slice(0, 220);
+    const message = redactBotToken(error, env).slice(0, 220);
     if (stub) {
       try {
         await stub.finishIntegrationCheck({ ok: false, checkedAt: Date.now(), version: BUILD_VERSION, error: message });
@@ -4224,26 +4798,26 @@ export default {
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/healthz")) {
       // Health checks are also a recovery path: if Cron has not fired yet, an
       // operator opening /healthz can still register and verify the webhook.
-      const beforeRepair = await telegramControlApi("getWebhookInfo").catch((error) => ({
+      const beforeRepair = await telegramControlApi(env, "getWebhookInfo").catch((error) => ({
         url: "",
-        _error: String(error?.message || error).replaceAll(EMBEDDED_BOT_TOKEN, "[redacted]").slice(0, 180),
+        _error: redactBotToken(error, env).slice(0, 180),
       }));
       let bootstrap = null;
-      if (beforeRepair?.url !== WEBHOOK_URL) {
+      if (beforeRepair?.url !== webhookUrlFrom(env)) {
         bootstrap = await repairTelegramIntegrationFromHealth(env);
       }
       const stub = env.SCHEDULER.get(env.SCHEDULER.idFromName(DO_NAME));
       const [telegram, webhook, scheduler] = await Promise.all([
-        telegramControlApi("getMe").then((result) => ({
+        telegramControlApi(env, "getMe").then((result) => ({
           ok: true,
           id: result.id,
           username: result.username || null,
         })).catch((error) => ({ ok: false, error: String(error?.message || error).slice(0, 180) })),
-        telegramControlApi("getWebhookInfo").then((result) => ({
+        telegramControlApi(env, "getWebhookInfo").then((result) => ({
           ok: true,
           url: result.url || "",
-          expectedUrl: WEBHOOK_URL,
-          matchesExpectedUrl: result.url === WEBHOOK_URL,
+          expectedUrl: webhookUrlFrom(env),
+          matchesExpectedUrl: result.url === webhookUrlFrom(env),
           pendingUpdates: Number(result.pending_update_count || 0),
           lastErrorAt: Number(result.last_error_date || 0) || null,
           lastError: result.last_error_message || null,
@@ -4258,7 +4832,7 @@ export default {
         status: ok ? "operational" : "degraded",
         requestId,
         worker: "online",
-        ownerConfigured: /^\d{1,20}$/.test(EMBEDDED_OWNER_TELEGRAM_ID),
+        ownerConfigured: Boolean(ownerIdFrom(env)),
         telegram,
         webhook,
         scheduler,
@@ -4278,7 +4852,7 @@ export default {
       }));
 
       const suppliedSecret = request.headers.get("x-telegram-bot-api-secret-token") || "";
-      if (suppliedSecret !== WEBHOOK_SECRET) {
+      if (!webhookSecretFrom(env) || suppliedSecret !== webhookSecretFrom(env)) {
         console.error(JSON.stringify({ event: "telegram_webhook_rejected", requestId, reason: "secret_mismatch" }));
         return response("Unauthorized", 401);
       }

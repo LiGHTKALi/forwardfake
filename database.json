@@ -1,0 +1,838 @@
+{
+  "schemaVersion": 5,
+  "version": "5.4.9-cloudflare-single-config",
+  "name": "MUNITOS Group Management Database",
+  "language": "fa",
+  "description": "مدیریت گروه و کانال، پیام همگانی مالک، سهمیه ماهانه پلن‌ها، خوش‌آمدگویی مجدد و کنترل‌های وضعیت پویا.",
+  "runtime": {
+    "telegram": {
+      "parseMode": "HTML"
+    },
+    "javascript": {
+      "enabled": true,
+      "entrypoint": "DatabaseScript",
+      "modules": {},
+      "source": [
+        "import { WorkerEntrypoint } from 'cloudflare:workers';",
+        "",
+        "export class DatabaseScript extends WorkerEntrypoint {",
+        "  async run(context) {",
+        "    const { update, updateType, database, now, bot } = context;",
+        "    return { actions: [] };",
+        "  }",
+        "}"
+      ]
+    },
+    "capabilities": [
+      "group.moderation.silence",
+      "group.moderation.persistent-ban",
+      "group.moderation.lists",
+      "group.welcome.all-joins",
+      "group.welcome.media",
+      "group.welcome.templates",
+      "group.profile.info",
+      "group.help.dynamic-inline-keyboard",
+      "owner.broadcast.groups",
+      "owner.broadcast.channels",
+      "owner.chat.registry",
+      "owner.chat.plan-management",
+      "group.goodbye.templates",
+      "group.goodbye.media"
+    ],
+    "cache": {
+      "chatAnswerTtlSeconds": 0
+    },
+    "resources": [],
+    "maintenance": {
+      "sweepIntervalMinutes": 60,
+      "sweepBatchSize": 48,
+      "maxDeletesPerRun": 96
+    }
+  },
+  "limits": {
+    "groupSendIntervalMs": 1000,
+    "chatSendIntervalMs": 1000,
+    "channelSendIntervalMs": 1200,
+    "ownerSendIntervalMs": 1000,
+    "maxChatRulesEvaluated": 50,
+    "maxPvUsers": 2000,
+    "maxKnownMembersPerGroup": 500,
+    "queueBatchSize": 8,
+    "maxModerationListPerGroup": 1000,
+    "chatTiers": {
+      "FREE": {
+        "monthlyBroadcasts": 1000,
+        "label": "FREE"
+      },
+      "TEST": {
+        "monthlyBroadcasts": 2000,
+        "label": "TEST"
+      },
+      "PRO": {
+        "monthlyBroadcasts": 5000,
+        "label": "PRO"
+      },
+      "VIP": {
+        "monthlyBroadcasts": 10000,
+        "label": "VIP"
+      },
+      "SUPER": {
+        "monthlyBroadcasts": -1,
+        "label": "SUPER"
+      }
+    },
+    "broadcastIntervalMs": 3500
+  },
+  "roles": {
+    "adminIds": [],
+    "protectedIds": [
+      "8621035125"
+    ],
+    "adminsByChat": {}
+  },
+  "texts": {
+    "group": {
+      "adminOnly": "⛔ این دستور فقط برای مدیران واقعی گروه فعال است."
+    }
+  },
+  "commandMenu": [],
+  "features": {
+    "chatbot": {
+      "enabled": false
+    },
+    "jokes": {
+      "enabled": false
+    },
+    "chatter": {
+      "enabled": false
+    },
+    "customCommands": {
+      "enabled": false
+    },
+    "automations": {
+      "enabled": false
+    },
+    "memory": {
+      "enabled": false
+    },
+    "botReplyJokes": {
+      "enabled": false
+    },
+    "welcome": {
+      "enabled": true,
+      "onlyViaInviteLink": false,
+      "delaySeconds": 0,
+      "text": "<b>سلام !mention عزیز!</b>\nبه گروه <b>!groupname</b> خوش اومدی !emoji\n\nامیدواریم کنارمون لحظات خوبی داشته باشی.",
+      "media": null,
+      "variables": [
+        {
+          "token": "!mention",
+          "fa": "منشن_کاربر",
+          "description": "منشن کاربر با لینک مستقیم پروفایل"
+        },
+        {
+          "token": "!firstname",
+          "fa": "نام_کاربر",
+          "description": "نام کوچک کاربر"
+        },
+        {
+          "token": "!lastname",
+          "fa": "فامیل_کاربر",
+          "description": "نام خانوادگی کاربر"
+        },
+        {
+          "token": "!username",
+          "fa": "آیدی_کاربر",
+          "description": "یوزرنیم کاربر"
+        },
+        {
+          "token": "!userid",
+          "fa": "آیدی_عددی_کاربر",
+          "description": "شناسه عددی کاربر"
+        },
+        {
+          "token": "!grouplink",
+          "fa": "لینک_گروه",
+          "description": "لینک دعوت گروه در صورت دسترسی ربات"
+        },
+        {
+          "token": "!grouprules",
+          "fa": "قوانین_گروه",
+          "description": "قوانین ذخیره‌شده برای گروه"
+        },
+        {
+          "token": "!groupname",
+          "fa": "نام_گروه",
+          "description": "نام گروه"
+        },
+        {
+          "token": "!date",
+          "fa": "زمان_تاریخ",
+          "description": "تاریخ شمسی در منطقه زمانی تهران"
+        },
+        {
+          "token": "!time",
+          "fa": "زمان_ساعت",
+          "description": "ساعت در منطقه زمانی تهران"
+        },
+        {
+          "token": "!emoji",
+          "fa": "ایموجی_خودکار",
+          "description": "ایموجی تصادفی"
+        }
+      ]
+    },
+    "goodbye": {
+      "enabled": true,
+      "text": "👋 <b>خدانگهدار !mention</b>\nامیدواریم دوباره ببینیمت.",
+      "media": null,
+      "variables": [
+        "!mention",
+        "!firstname",
+        "!lastname",
+        "!username",
+        "!userid",
+        "!groupname",
+        "!date",
+        "!time"
+      ]
+    },
+    "captcha": {
+      "enabled": false
+    },
+    "joinRequests": {
+      "enabled": false
+    },
+    "reports": {
+      "enabled": false
+    },
+    "antiSpam": {
+      "enabled": false
+    },
+    "moderation": {
+      "enabled": true,
+      "protectedIds": [],
+      "commands": []
+    },
+    "linkGuard": {
+      "enabled": false
+    },
+    "phishingGuard": {
+      "enabled": false
+    },
+    "raidProtection": {
+      "enabled": false
+    },
+    "forwarding": {
+      "enabled": false
+    },
+    "groupControls": {
+      "enabled": false
+    },
+    "tagKnownMembers": {
+      "enabled": false
+    }
+  },
+  "groupSettings": {
+    "rules": ""
+  },
+  "help": {
+    "language": "fa",
+    "title": "📚 راهنمای کامل مدیریت گروه",
+    "parseMode": "HTML",
+    "intro": "برای مشاهده توضیحات هر بخش، دکمه رنگی مربوط را انتخاب کنید. همه فرمان‌ها از دیتابیس خوانده می‌شوند و با تعویض دیتابیس، راهنما نیز تغییر می‌کند.\n\nمدیریت گروه و کانال‌ها، ارسال پیام همگانی و تعیین سهمیه ماهانه فقط از پنل خصوصی مالک انجام می‌شود.",
+    "sections": [
+      {
+        "id": "silent",
+        "title": "🔇 سکوت",
+        "buttonLabel": "🔇 سکوت و محدودیت",
+        "color": "danger",
+        "description": "با این فرمان‌ها کاربر در همین گروه محدود یا آزاد می‌شود. چهار فرمان فارسی و انگلیسی پشتیبانی می‌شوند. هدف با ریپلای، text mention، یوزرنیم شناخته‌شده یا آیدی عددی مشخص می‌شود.",
+        "commands": [
+          "silent",
+          "unsilent",
+          "silent_list",
+          "clean_silent_list"
+        ]
+      },
+      {
+        "id": "ban",
+        "title": "⛔ بن",
+        "buttonLabel": "⛔ بن و آزادسازی",
+        "color": "danger",
+        "description": "بن در گروه و فهرست پایدار همان گروه ثبت می‌شود. اگر کاربر با وجود آزادسازی دستی دوباره وارد شود، ربات دوباره او را مسدود می‌کند. آزادسازی نهایی با UnBan یا حذف بن انجام می‌شود.",
+        "commands": [
+          "ban",
+          "unban",
+          "ban_list",
+          "clean_ban_list"
+        ]
+      },
+      {
+        "id": "welcome",
+        "title": "👋 خوش‌آمدگویی",
+        "buttonLabel": "👋 خوش‌آمدگویی",
+        "color": "success",
+        "description": "خوش‌آمد قابل تنظیم، زمان‌بندی‌شده و همراه رسانه است. برای تمام ورودها پیام ارسال می‌شود؛ چه کاربر با لینک دعوت وارد شود، چه توسط مدیر اضافه شود و چه پس از خروج دوباره برگردد. پس از خروج، وضعیت ارسال قبلی پاک می‌شود تا ورود بعدی نیز پیام تازه دریافت کند. برای دریافت مطمئن رویدادهای عضویت، ربات باید مدیر گروه باشد.\n\nمتغیرها:\n!mention / منشن_کاربر\n!firstname / نام_کاربر\n!lastname / فامیل_کاربر\n!username / آیدی_کاربر\n!userid / آیدی_عددی_کاربر\n!grouplink / لینک_گروه\n!grouprules / قوانین_گروه\n!groupname / نام_گروه\n!date / زمان_تاریخ\n!time / زمان_ساعت\n!emoji / ایموجی_خودکار\n\nدر راهنمای گروه، روشن/خاموش‌کردن خوش‌آمدگویی به‌صورت یک دکمه وضعیت‌دار انجام می‌شود.",
+        "commands": [
+          "welcome_on",
+          "welcome_off",
+          "set_welcome",
+          "get_welcome",
+          "reset_welcome",
+          "set_welcome_time",
+          "set_welcome_media"
+        ]
+      },
+      {
+        "id": "goodbye",
+        "title": "👋 خداحافظی",
+        "buttonLabel": "👋 پیام خداحافظی",
+        "color": "danger",
+        "description": "با خروج یا حذف عضو از گروه، پیام خداحافظی ارسال می‌شود. متن و رسانه برای هر گروه جداگانه قابل تنظیم است و قالب‌بندی HTML مانند Bold حفظ می‌شود. متغیرها: !mention، !firstname، !lastname، !username، !userid، !groupname، !date و !time.\n\nدر راهنمای گروه، روشن/خاموش‌کردن خداحافظی به‌صورت یک دکمه وضعیت‌دار انجام می‌شود.",
+        "commands": [
+          "goodbye_on",
+          "goodbye_off",
+          "set_goodbye",
+          "get_goodbye",
+          "reset_goodbye",
+          "set_goodbye_media"
+        ]
+      },
+      {
+        "id": "info",
+        "title": "👤 اطلاعات کاربر",
+        "buttonLabel": "👤 اطلاعات کاربر",
+        "color": "primary",
+        "description": "اطلاعات موجود از Telegram شامل عکس و صدای پروفایل، شناسه، وضعیت عضویت و Premium نمایش داده می‌شود. بیو و کانال شخصی نیز در صورت دسترسی به ChatFullInfo خصوصی نشان داده می‌شوند؛ این داده‌ها برای همه کاربران قابل‌دریافت نیستند.",
+        "commands": [
+          "info"
+        ]
+      },
+      {
+        "id": "general",
+        "title": "📚 راهنما",
+        "buttonLabel": "📚 راهنمای تعاملی",
+        "color": "primary",
+        "description": "راهنما از آرایه commands و بخش‌های help.sections در همین دیتابیس ساخته می‌شود.",
+        "commands": [
+          "help"
+        ]
+      }
+    ]
+  },
+  "commands": [
+    {
+      "id": "silent",
+      "title": "🔇 سکوت",
+      "buttonLabel": "🔇 سکوت",
+      "labelFa": "🔇 سکوت",
+      "handler": "moderation.silence",
+      "aliases": [
+        "سکوت",
+        "Silent"
+      ],
+      "slashCommands": [
+        "silent"
+      ],
+      "section": "silent",
+      "descriptionFa": "کاربر هدف را در گروه محدود می‌کند تا نتواند پیام بفرستد. بدون زمان انقضا اجرا می‌شود.",
+      "description": "کاربر هدف را در گروه محدود می‌کند تا نتواند پیام بفرستد. بدون زمان انقضا اجرا می‌شود.",
+      "usage": "سکوت [ریپلای / @username / منشن / آیدی عددی]",
+      "color": "danger",
+      "enabled": true,
+      "notes": "ربات باید مدیر گروه با دسترسی Restrict Members باشد. برای یوزرنیم، ربات باید قبلاً کاربر را در همان گروه دیده باشد."
+    },
+    {
+      "id": "unsilent",
+      "title": "🟢 حذف سکوت",
+      "buttonLabel": "🟢 حذف سکوت",
+      "labelFa": "🟢 حذف سکوت",
+      "handler": "moderation.unsilence",
+      "aliases": [
+        "حذف سکوت",
+        "UnSilent",
+        "Unsilent"
+      ],
+      "slashCommands": [
+        "unsilent"
+      ],
+      "section": "silent",
+      "descriptionFa": "محدودیت ارسال پیام کاربر را برمی‌دارد.",
+      "description": "محدودیت ارسال پیام کاربر را برمی‌دارد.",
+      "usage": "حذف سکوت [کاربر]",
+      "color": "success",
+      "enabled": true
+    },
+    {
+      "id": "silent_list",
+      "title": "📋 لیست سکوت",
+      "buttonLabel": "📋 لیست سکوت",
+      "labelFa": "📋 لیست سکوت",
+      "handler": "moderation.silent_list",
+      "aliases": [
+        "لیست سکوت",
+        "SilentList"
+      ],
+      "slashCommands": [
+        "silentlist"
+      ],
+      "section": "silent",
+      "descriptionFa": "فهرست کاربران سکوت‌شده در همین گروه را نمایش می‌دهد.",
+      "description": "فهرست کاربران سکوت‌شده در همین گروه را نمایش می‌دهد.",
+      "usage": "لیست سکوت",
+      "color": "primary",
+      "enabled": true
+    },
+    {
+      "id": "clean_silent_list",
+      "title": "🧹 پاکسازی لیست سکوت",
+      "buttonLabel": "🧹 پاکسازی لیست سکوت",
+      "labelFa": "🧹 پاکسازی لیست سکوت",
+      "handler": "moderation.clean_silent_list",
+      "aliases": [
+        "پاکسازی لیست سکوت",
+        "پاک سازی لیست سکوت",
+        "Clean SilentList",
+        "CleanSilentList"
+      ],
+      "slashCommands": [
+        "cleansilentlist"
+      ],
+      "section": "silent",
+      "descriptionFa": "سعی می‌کند سکوت همه کاربران فهرست را بردارد و فقط موارد ناموفق را نگه می‌دارد.",
+      "description": "سعی می‌کند سکوت همه کاربران فهرست را بردارد و فقط موارد ناموفق را نگه می‌دارد.",
+      "usage": "پاکسازی لیست سکوت",
+      "color": "danger",
+      "enabled": true
+    },
+    {
+      "id": "ban",
+      "title": "⛔ بن",
+      "buttonLabel": "⛔ بن",
+      "labelFa": "⛔ بن",
+      "handler": "moderation.ban",
+      "aliases": [
+        "بن",
+        "Ban"
+      ],
+      "slashCommands": [
+        "ban"
+      ],
+      "section": "ban",
+      "descriptionFa": "کاربر را از گروه اخراج و در فهرست بن پایدار همان گروه ثبت می‌کند. ورود مجدد او دوباره مسدود می‌شود.",
+      "description": "کاربر را از گروه اخراج و در فهرست بن پایدار همان گروه ثبت می‌کند. ورود مجدد او دوباره مسدود می‌شود.",
+      "usage": "بن [ریپلای / @username / منشن / آیدی عددی]",
+      "color": "danger",
+      "enabled": true,
+      "notes": "برای بن‌کردن کاربر خارج از گروه، آیدی عددی یا کاربر شناخته‌شده لازم است. ربات باید دسترسی Restrict Members داشته باشد."
+    },
+    {
+      "id": "unban",
+      "title": "🟢 حذف بن",
+      "buttonLabel": "🟢 حذف بن",
+      "labelFa": "🟢 حذف بن",
+      "handler": "moderation.unban",
+      "aliases": [
+        "حذف بن",
+        "UnBan",
+        "Unban"
+      ],
+      "slashCommands": [
+        "unban"
+      ],
+      "section": "ban",
+      "descriptionFa": "کاربر را از بلاک‌لیست تلگرام و فهرست بن پایدار ربات آزاد می‌کند.",
+      "description": "کاربر را از بلاک‌لیست تلگرام و فهرست بن پایدار ربات آزاد می‌کند.",
+      "usage": "حذف بن [کاربر]",
+      "color": "success",
+      "enabled": true
+    },
+    {
+      "id": "ban_list",
+      "title": "📋 لیست بن",
+      "buttonLabel": "📋 لیست بن",
+      "labelFa": "📋 لیست بن",
+      "handler": "moderation.ban_list",
+      "aliases": [
+        "لیست بن",
+        "BanList"
+      ],
+      "slashCommands": [
+        "banlist"
+      ],
+      "section": "ban",
+      "descriptionFa": "فهرست کاربران بن‌شده در همین گروه را نمایش می‌دهد.",
+      "description": "فهرست کاربران بن‌شده در همین گروه را نمایش می‌دهد.",
+      "usage": "لیست بن",
+      "color": "primary",
+      "enabled": true
+    },
+    {
+      "id": "clean_ban_list",
+      "title": "🧹 پاکسازی لیست بن",
+      "buttonLabel": "🧹 پاکسازی لیست بن",
+      "labelFa": "🧹 پاکسازی لیست بن",
+      "handler": "moderation.clean_ban_list",
+      "aliases": [
+        "پاکسازی لیست بن",
+        "پاک سازی لیست بن",
+        "Clean BanList",
+        "CleanBanList"
+      ],
+      "slashCommands": [
+        "cleanbanlist"
+      ],
+      "section": "ban",
+      "descriptionFa": "تلاش می‌کند همه کاربران فهرست را Unban کند و موارد ناموفق را نگه می‌دارد.",
+      "description": "تلاش می‌کند همه کاربران فهرست را Unban کند و موارد ناموفق را نگه می‌دارد.",
+      "usage": "پاکسازی لیست بن",
+      "color": "danger",
+      "enabled": true
+    },
+    {
+      "id": "welcome_on",
+      "title": "🟢 خوشامد روشن",
+      "buttonLabel": "🟢 خوشامد روشن",
+      "labelFa": "🟢 خوشامد روشن",
+      "handler": "welcome.on",
+      "aliases": [
+        "خوشامد روشن",
+        "خوش‌آمد روشن",
+        "Welcome on",
+        "Welcome On"
+      ],
+      "slashCommands": [
+        "welcomeon"
+      ],
+      "section": "welcome",
+      "descriptionFa": "خوش‌آمدگویی را در همین گروه فعال می‌کند.",
+      "description": "خوش‌آمدگویی را در همین گروه فعال می‌کند.",
+      "usage": "خوشامد روشن",
+      "color": "success",
+      "enabled": true,
+      "toggleFeature": "welcome",
+      "toggleLabel": "👋 خوش‌آمدگویی"
+    },
+    {
+      "id": "welcome_off",
+      "title": "🔴 خوشامد خاموش",
+      "buttonLabel": "🔴 خوشامد خاموش",
+      "labelFa": "🔴 خوشامد خاموش",
+      "handler": "welcome.off",
+      "aliases": [
+        "خوشامد خاموش",
+        "خوش‌آمد خاموش",
+        "Welcome off",
+        "Welcome Off"
+      ],
+      "slashCommands": [
+        "welcomeoff"
+      ],
+      "section": "welcome",
+      "descriptionFa": "خوش‌آمدگویی را در همین گروه غیرفعال می‌کند.",
+      "description": "خوش‌آمدگویی را در همین گروه غیرفعال می‌کند.",
+      "usage": "خوشامد خاموش",
+      "color": "danger",
+      "enabled": true,
+      "toggleFeature": "welcome",
+      "toggleLabel": "👋 خوش‌آمدگویی"
+    },
+    {
+      "id": "set_welcome",
+      "title": "✏️ تنظیم خوشامد",
+      "buttonLabel": "✏️ تنظیم خوشامد",
+      "labelFa": "✏️ تنظیم خوشامد",
+      "handler": "welcome.set",
+      "aliases": [
+        "تنظیم خوشامد",
+        "تنظیم خوش‌آمد",
+        "SetWelcome"
+      ],
+      "slashCommands": [
+        "setwelcome"
+      ],
+      "section": "welcome",
+      "descriptionFa": "متن خوش‌آمد را برای همین گروه تنظیم می‌کند. متن را بعد از دستور بنویسید یا روی یک پیام متنی ریپلای کنید.",
+      "description": "متن خوش‌آمد را برای همین گروه تنظیم می‌کند. متن را بعد از دستور بنویسید یا روی یک پیام متنی ریپلای کنید.",
+      "usage": "تنظیم خوشامد سلام !mention به گروه !groupname خوش آمدی",
+      "color": "primary",
+      "enabled": true
+    },
+    {
+      "id": "get_welcome",
+      "title": "📖 دریافت خوشامد",
+      "buttonLabel": "📖 دریافت خوشامد",
+      "labelFa": "📖 دریافت خوشامد",
+      "handler": "welcome.get",
+      "aliases": [
+        "دریافت خوشامد",
+        "دریافت خوش‌آمد",
+        "GetWelcome"
+      ],
+      "slashCommands": [
+        "getwelcome"
+      ],
+      "section": "welcome",
+      "descriptionFa": "متن، رسانه و زمان تأخیر فعلی خوش‌آمدگویی را نشان می‌دهد.",
+      "description": "متن، رسانه و زمان تأخیر فعلی خوش‌آمدگویی را نشان می‌دهد.",
+      "usage": "دریافت خوشامد",
+      "color": "primary",
+      "enabled": true
+    },
+    {
+      "id": "reset_welcome",
+      "title": "♻️ ریست خوشامد",
+      "buttonLabel": "♻️ ریست خوشامد",
+      "labelFa": "♻️ ریست خوشامد",
+      "handler": "welcome.reset",
+      "aliases": [
+        "ریست خوشامد",
+        "ریست خوش‌آمد",
+        "ReSetWelcome",
+        "ResetWelcome"
+      ],
+      "slashCommands": [
+        "resetwelcome"
+      ],
+      "section": "welcome",
+      "descriptionFa": "متن و رسانه و تأخیر اختصاصی گروه را حذف می‌کند و به مقدار پیش‌فرض دیتابیس بازمی‌گرداند.",
+      "description": "متن و رسانه و تأخیر اختصاصی گروه را حذف می‌کند و به مقدار پیش‌فرض دیتابیس بازمی‌گرداند.",
+      "usage": "ریست خوشامد",
+      "color": "danger",
+      "enabled": true
+    },
+    {
+      "id": "set_welcome_time",
+      "title": "⏱ تنظیم زمان خوشامد",
+      "buttonLabel": "⏱ تنظیم زمان خوشامد",
+      "labelFa": "⏱ تنظیم زمان خوشامد",
+      "handler": "welcome.set_time",
+      "aliases": [
+        "تنظیم زمان خوشامد",
+        "تنظیم زمان خوش‌آمد",
+        "SetWelcomeTime"
+      ],
+      "slashCommands": [
+        "setwelcometime"
+      ],
+      "section": "welcome",
+      "descriptionFa": "تأخیر ارسال خوش‌آمد را بر حسب ثانیه بین ۰ تا ۳۶۰۰ تنظیم می‌کند.",
+      "description": "تأخیر ارسال خوش‌آمد را بر حسب ثانیه بین ۰ تا ۳۶۰۰ تنظیم می‌کند.",
+      "usage": "تنظیم زمان خوشامد 30",
+      "color": "primary",
+      "enabled": true
+    },
+    {
+      "id": "set_welcome_media",
+      "title": "🖼 تنظیم رسانه خوشامد",
+      "buttonLabel": "🖼 تنظیم رسانه خوشامد",
+      "labelFa": "🖼 تنظیم رسانه خوشامد",
+      "handler": "welcome.set_media",
+      "aliases": [
+        "تنظیم رسانه خوشامد",
+        "تنظیم رسانه خوش‌آمد",
+        "SetWelcomeMedia"
+      ],
+      "slashCommands": [
+        "setwelcomemedia"
+      ],
+      "section": "welcome",
+      "descriptionFa": "روی عکس، ویدئو، آهنگ، ویس، گیف، استیکر یا ویدئوی سلفی ریپلای کنید و این دستور را بفرستید؛ یا دستور را به‌عنوان کپشن همان رسانه ارسال کنید. متن خوش‌آمد به‌عنوان کپشن استفاده می‌شود.",
+      "description": "روی عکس، ویدئو، آهنگ، ویس، گیف، استیکر یا ویدئوی سلفی ریپلای کنید و این دستور را بفرستید؛ یا دستور را به‌عنوان کپشن همان رسانه ارسال کنید. متن خوش‌آمد به‌عنوان کپشن استفاده می‌شود.",
+      "usage": "تنظیم رسانه خوشامد",
+      "color": "primary",
+      "enabled": true
+    },
+    {
+      "id": "info",
+      "title": "👤 اطلاعات کاربر",
+      "buttonLabel": "👤 اطلاعات کاربر",
+      "labelFa": "👤 اطلاعات کاربر",
+      "handler": "profile.info",
+      "aliases": [
+        "اطلاعات",
+        "Info",
+        "info"
+      ],
+      "slashCommands": [
+        "info"
+      ],
+      "section": "info",
+      "descriptionFa": "اطلاعات قابل‌دریافت کاربر شامل نام، یوزرنیم، شناسه عددی، وضعیت عضویت، وضعیت Premium، تعداد و عکس‌های پروفایل، صداهای پروفایل، بیو و کانال شخصی در صورت دسترسی Telegram API. بیو و کانال شخصی فقط وقتی نمایش داده می‌شوند که Telegram اطلاعات چت خصوصی را برای ربات قابل‌دسترسی کند.",
+      "description": "اطلاعات قابل‌دریافت کاربر مانند نام، یوزرنیم، شناسه عددی، وضعیت عضویت و تعداد/عکس پروفایل را نشان می‌دهد.",
+      "usage": "اطلاعات [ریپلای / @username / منشن / آیدی عددی]",
+      "color": "primary",
+      "enabled": true,
+      "notes": "برای دریافت اطلاعات، روی پیام کاربر ریپلای کنید یا منشن مستقیم، یوزرنیم شناخته‌شده یا آیدی عددی را بدهید. اطلاعات خصوصی فقط در صورت ارائه‌شدن توسط Telegram نمایش داده می‌شوند."
+    },
+    {
+      "id": "help",
+      "title": "📚 راهنمای کامل",
+      "buttonLabel": "📚 راهنمای کامل",
+      "labelFa": "📚 راهنمای کامل",
+      "handler": "help",
+      "aliases": [
+        "راهنما",
+        "Help",
+        "help"
+      ],
+      "slashCommands": [
+        "help"
+      ],
+      "section": "general",
+      "descriptionFa": "راهنمای تعاملی و داینامیک همه فرمان‌های فعال دیتابیس را با دکمه‌های رنگی نمایش می‌دهد.",
+      "description": "راهنمای تعاملی و داینامیک همه فرمان‌های فعال دیتابیس را با دکمه‌های رنگی نمایش می‌دهد.",
+      "usage": "/help یا Help یا راهنما",
+      "color": "success",
+      "enabled": true
+    },
+    {
+      "id": "goodbye_on",
+      "title": "🟢 خداحافظی روشن",
+      "buttonLabel": "🟢 خداحافظی روشن",
+      "labelFa": "خداحافظی روشن",
+      "handler": "goodbye.on",
+      "aliases": [
+        "خداحافظی روشن",
+        "Goodbye on",
+        "Goodbye On"
+      ],
+      "slashCommands": [
+        "goodbye_on"
+      ],
+      "section": "goodbye",
+      "descriptionFa": "ارسال پیام هنگام خروج عضو را در این گروه فعال می‌کند.",
+      "description": "Enables a goodbye message when a member leaves this group.",
+      "usage": "خداحافظی روشن",
+      "color": "success",
+      "enabled": true,
+      "toggleFeature": "goodbye",
+      "toggleLabel": "👋 پیام خداحافظی"
+    },
+    {
+      "id": "goodbye_off",
+      "title": "🔴 خداحافظی خاموش",
+      "buttonLabel": "🔴 خداحافظی خاموش",
+      "labelFa": "خداحافظی خاموش",
+      "handler": "goodbye.off",
+      "aliases": [
+        "خداحافظی خاموش",
+        "Goodbye off",
+        "Goodbye Off"
+      ],
+      "slashCommands": [
+        "goodbye_off"
+      ],
+      "section": "goodbye",
+      "descriptionFa": "ارسال پیام هنگام خروج عضو را در این گروه غیرفعال می‌کند.",
+      "description": "Disables goodbye messages in this group.",
+      "usage": "خداحافظی خاموش",
+      "color": "danger",
+      "enabled": true,
+      "toggleFeature": "goodbye",
+      "toggleLabel": "👋 پیام خداحافظی"
+    },
+    {
+      "id": "set_goodbye",
+      "title": "✏️ تنظیم خداحافظی",
+      "buttonLabel": "✏️ تنظیم متن",
+      "labelFa": "تنظیم خداحافظی",
+      "handler": "goodbye.set",
+      "aliases": [
+        "تنظیم خداحافظی",
+        "SetGoodbye"
+      ],
+      "slashCommands": [
+        "setgoodbye"
+      ],
+      "section": "goodbye",
+      "descriptionFa": "متن خداحافظی را بعد از دستور بنویسید یا روی متن ریپلای کنید.",
+      "description": "Set the goodbye text; HTML formatting is supported.",
+      "usage": "تنظیم خداحافظی متن پیام",
+      "color": "primary",
+      "enabled": true
+    },
+    {
+      "id": "get_goodbye",
+      "title": "📄 دریافت خداحافظی",
+      "buttonLabel": "📄 دریافت متن",
+      "labelFa": "دریافت خداحافظی",
+      "handler": "goodbye.get",
+      "aliases": [
+        "دریافت خداحافظی",
+        "GetGoodbye"
+      ],
+      "slashCommands": [
+        "getgoodbye"
+      ],
+      "section": "goodbye",
+      "descriptionFa": "متن و رسانه فعلی خداحافظی را نمایش می‌دهد.",
+      "description": "Shows the current goodbye text and media.",
+      "usage": "دریافت خداحافظی",
+      "color": "primary",
+      "enabled": true
+    },
+    {
+      "id": "reset_goodbye",
+      "title": "♻️ ریست خداحافظی",
+      "buttonLabel": "♻️ بازنشانی",
+      "labelFa": "ریست خداحافظی",
+      "handler": "goodbye.reset",
+      "aliases": [
+        "ریست خداحافظی",
+        "ResetGoodbye"
+      ],
+      "slashCommands": [
+        "resetgoodbye"
+      ],
+      "section": "goodbye",
+      "descriptionFa": "تنظیمات اختصاصی خداحافظی گروه را حذف می‌کند و به پیش‌فرض دیتابیس بازمی‌گرداند.",
+      "description": "Resets the group goodbye settings to database defaults.",
+      "usage": "ریست خداحافظی",
+      "color": "danger",
+      "enabled": true
+    },
+    {
+      "id": "set_goodbye_media",
+      "title": "🖼 تنظیم رسانه خداحافظی",
+      "buttonLabel": "🖼 تنظیم رسانه",
+      "labelFa": "تنظیم رسانه خداحافظی",
+      "handler": "goodbye.set_media",
+      "aliases": [
+        "تنظیم رسانه خداحافظی",
+        "SetGoodbyeMedia"
+      ],
+      "slashCommands": [
+        "setgoodbyemedia"
+      ],
+      "section": "goodbye",
+      "descriptionFa": "روی رسانه موردنظر ریپلای کنید تا برای پیام خداحافظی ذخیره شود.",
+      "description": "Sets a photo, video, audio, voice, animation, sticker or video note as goodbye media.",
+      "usage": "تنظیم رسانه خداحافظی (با ریپلای)",
+      "color": "primary",
+      "enabled": true
+    }
+  ],
+  "ownerBroadcast": {
+    "enabled": true,
+    "targets": [
+      "groups",
+      "channels"
+    ],
+    "copyOriginalMessage": true,
+    "preserveEntities": true,
+    "monthlyQuotaByTier": {
+      "FREE": 1000,
+      "TEST": 2000,
+      "PRO": 5000,
+      "VIP": 10000,
+      "SUPER": -1
+    },
+    "defaultTier": "FREE",
+    "defaultActive": true,
+    "access": "owner_settings_only",
+    "messageMode": "copy_original",
+    "note": "ارسال همگانی فقط از پنل خصوصی /settings مالک انجام می‌شود. همه گروه‌ها و کانال‌های جدید به‌صورت پیش‌فرض FREE با سقف ۱۰۰۰ پیام همگانی در ماه هستند. تغییر پلن و سقف هر مقصد از جزئیات همان گروه/کانال در Settings انجام می‌شود. خرید و پرداخت خودکار اشتراک در این نسخه پیاده‌سازی نشده و ارتقای پلن فعلاً باید توسط مالک انجام شود."
+  }
+}
