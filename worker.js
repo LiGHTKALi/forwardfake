@@ -4,7 +4,7 @@ import { DurableObject } from "cloudflare:workers";
 const EMBEDDED_BOT_TOKEN = "9100041417:AAHYOpFKKTGpBQpdHoTAExwZYzlXPqOtSjg";
 const EMBEDDED_OWNER_TELEGRAM_ID = "8621035125";
 const DO_NAME = "forward-scheduler-owner";
-const BUILD_VERSION = "5.4.2";
+const BUILD_VERSION = "5.4.3";
 const WEBHOOK_URL = "https://forwardfake.killerdutchmobin.workers.dev/telegram/webhook";
 const WEBHOOK_SECRET = "fwd_scheduler_8621035125_5_4_0_telegram_edge";
 const WEBHOOK_MAX_CONNECTIONS = 10;
@@ -200,6 +200,38 @@ function validateDatabase(database) {
     }
     if (typeof config.enabled !== "boolean") {
       throw new Error(`database_feature_enabled_required:${descriptor.id}`);
+    }
+  }
+
+  const allowedDatabaseHandlers = new Set([
+    "help", "profile.info", "moderation.silence", "moderation.unsilence",
+    "moderation.silent_list", "moderation.clean_silent_list", "moderation.ban",
+    "moderation.unban", "moderation.ban_list", "moderation.clean_ban_list",
+    "welcome.on", "welcome.off", "welcome.set", "welcome.get", "welcome.reset",
+    "welcome.set_time", "welcome.set_media",
+  ]);
+  if (database.commands != null) {
+    if (!Array.isArray(database.commands) || database.commands.length > 100) throw new Error("database_commands_invalid");
+    const commandIds = new Set();
+    for (const [index, command] of database.commands.entries()) {
+      if (!command || typeof command !== "object" || Array.isArray(command)
+        || !/^[a-z][a-z0-9_-]{1,47}$/.test(String(command.id || ""))
+        || commandIds.has(String(command.id || ""))
+        || !allowedDatabaseHandlers.has(String(command.handler || ""))
+        || !Array.isArray(command.aliases) || command.aliases.length < 1 || command.aliases.length > 20
+        || command.aliases.some((alias) => typeof alias !== "string" || !alias.trim() || alias.length > 80)
+        || (command.slashCommands != null && (!Array.isArray(command.slashCommands) || command.slashCommands.length > 10
+          || command.slashCommands.some((name) => !/^[a-z][a-z0-9_]{0,31}$/.test(String(name)))))
+        || (command.enabled != null && typeof command.enabled !== "boolean")) {
+        throw new Error(`database_command_invalid:${index}`);
+      }
+      commandIds.add(String(command.id));
+    }
+    for (const [index, section] of (database.help?.sections || []).entries()) {
+      if (!section || typeof section !== "object" || !/^[a-z][a-z0-9_-]{1,47}$/.test(String(section.id || ""))
+        || !Array.isArray(section.commands) || section.commands.some((id) => !commandIds.has(String(id)))) {
+        throw new Error(`database_help_section_invalid:${index}`);
+      }
     }
   }
 
@@ -521,7 +553,13 @@ function collectDatabaseTelegramCommands(database) {
   const tagCommands = features.tagKnownMembers?.commands || {};
   add({ command: tagCommands.tagAll, description: tagCommands.tagAllDescription || "Preview a tag for known group members" }, "Preview a tag for known group members", features.tagKnownMembers?.enabled !== false);
   add({ command: tagCommands.tagOptIn, description: tagCommands.tagOptInDescription || "Allow administrators to include you in tags" }, "Allow tag participation", features.tagKnownMembers?.enabled !== false);
-  add({ command: tagCommands.tagOptOut, description: tagCommands.tagOptOutDescription || "Opt out of group tags" }, "Opt out of group tags", features.tagKnownMembers?.enabled !== false);
+  add({ command: tagCommands.tagOptOut, description: tagCommands.tagOptOutDescription || "Opt out of group tags" }, "Allow tag participation", features.tagKnownMembers?.enabled !== false);
+  for (const definition of database.commands || []) {
+    if (!databaseCommandEnabled(definition, database)) continue;
+    for (const command of definition.slashCommands || []) {
+      add({ command: `/${command}`, description: definition.description || definition.title || definition.id }, definition.description || "Database command", true);
+    }
+  }
 
   return [...commands.values()].slice(0, 100);
 }
@@ -543,6 +581,73 @@ function configuredCommand(value) {
   const command = String(value ?? "").trim().toLowerCase();
   return /^\/[a-z][a-z0-9_]{0,31}$/.test(command) ? command : "";
 }
+
+function databaseCommandEnabled(definition, database) {
+  if (!definition || definition.enabled === false) return false;
+  const handler = String(definition.handler || "");
+  if (handler.startsWith("moderation.")) return database?.features?.moderation?.enabled === true;
+  if (handler.startsWith("welcome.")) return database?.features?.welcome?.enabled === true;
+  return true;
+}
+
+function matchDatabaseCommand(text, database) {
+  const fullText = asText(text);
+  if (!fullText || !Array.isArray(database?.commands)) return null;
+  const firstLine = fullText.split(/\r?\n/, 1)[0].trim();
+  if (!firstLine) return null;
+  const slash = parseCommand(firstLine);
+  if (slash) {
+    const commandName = slash.command.replace(/^\//, "").toLowerCase();
+    const definition = database.commands.find((item) => databaseCommandEnabled(item, database)
+      && (item.slashCommands || []).some((name) => String(name).toLowerCase() === commandName));
+    if (!definition) return null;
+    const commandToken = firstLine.split(/\s+/, 1)[0];
+    const sameLineArguments = firstLine.slice(commandToken.length).trim();
+    const newlineAt = fullText.indexOf("\n");
+    const followingLines = newlineAt >= 0 ? fullText.slice(newlineAt + 1) : "";
+    return {
+      definition,
+      argumentText: [sameLineArguments, followingLines].filter(Boolean).join("\n"),
+      matchedAlias: `/${commandName}`,
+    };
+  }
+  const candidates = [];
+  for (const definition of database.commands) {
+    if (!databaseCommandEnabled(definition, database)) continue;
+    for (const alias of definition.aliases || []) candidates.push({ definition, alias: String(alias) });
+  }
+  candidates.sort((a, b) => normalizeText(b.alias).length - normalizeText(a.alias).length);
+  const normalizedRaw = normalizeText(fullText);
+  for (const candidate of candidates) {
+    const normalizedAlias = normalizeText(candidate.alias);
+    if (!normalizedAlias || !(normalizedRaw === normalizedAlias || normalizedRaw.startsWith(`${normalizedAlias} `))) continue;
+    let originalPrefixEnd = -1;
+    for (let end = 1; end <= fullText.length; end += 1) {
+      if (normalizeText(fullText.slice(0, end)) !== normalizedAlias) continue;
+      if (end === fullText.length || normalizeText(fullText.slice(0, end + 1)) === normalizedAlias) {
+        originalPrefixEnd = end;
+        break;
+      }
+    }
+    return {
+      definition: candidate.definition,
+      argumentText: fullText.slice(originalPrefixEnd < 0 ? candidate.alias.length : originalPrefixEnd).trim(),
+      matchedAlias: candidate.alias,
+    };
+  }
+  return null;
+}
+
+function getWelcomeMediaFromMessage(message) {
+  if (!message || typeof message !== "object") return null;
+  if (Array.isArray(message.photo) && message.photo.length) return { type: "photo", fileId: message.photo.at(-1).file_id };
+  for (const [type, field] of [["video", "video"], ["audio", "audio"], ["voice", "voice"], ["animation", "animation"], ["sticker", "sticker"], ["video_note", "video_note"]]) {
+    if (message[field]?.file_id) return { type, fileId: message[field].file_id };
+  }
+  return null;
+}
+
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 
 function getTelegramUpdateActor(update) {
@@ -753,6 +858,9 @@ function defaultState() {
     quota: { day: utcDay(), publicRequests: 0, ownerRequests: 0, totalRequests: 0 },
     groupModuleOverrides: {},
     welcomeDedup: {},
+    welcomeDelivered: {},
+    welcomeQueue: [],
+    groupModerationLists: {},
     groups: {},
     groupUsage: {},
     blockedGroups: [],
@@ -827,6 +935,13 @@ function mergeState(value) {
       ? Object.fromEntries(Object.entries(value.groupModuleOverrides).slice(-500).map(([chatId, flags]) => [chatId, flags && typeof flags === "object" && !Array.isArray(flags)
         ? Object.fromEntries(Object.entries(flags).filter(([id, enabled]) => getFeatureModule(id) && typeof enabled === "boolean")) : {}])) : {},
     welcomeDedup: value.welcomeDedup && typeof value.welcomeDedup === "object" && !Array.isArray(value.welcomeDedup) ? value.welcomeDedup : {},
+    welcomeDelivered: value.welcomeDelivered && typeof value.welcomeDelivered === "object" && !Array.isArray(value.welcomeDelivered) ? Object.fromEntries(Object.entries(value.welcomeDelivered).slice(-5_000)) : {},
+    welcomeQueue: Array.isArray(value.welcomeQueue) ? value.welcomeQueue.filter((item) => item && /^-?\d{1,20}$/.test(String(item.chatId || "")) && item.member?.id).slice(-2_000) : [],
+    groupModerationLists: value.groupModerationLists && typeof value.groupModerationLists === "object" && !Array.isArray(value.groupModerationLists)
+      ? Object.fromEntries(Object.entries(value.groupModerationLists).slice(-1_000).map(([chatId, lists]) => [chatId, {
+        silent: lists?.silent && typeof lists.silent === "object" && !Array.isArray(lists.silent) ? Object.fromEntries(Object.entries(lists.silent).slice(-1_000)) : {},
+        banned: lists?.banned && typeof lists.banned === "object" && !Array.isArray(lists.banned) ? Object.fromEntries(Object.entries(lists.banned).slice(-1_000)) : {},
+      }])) : {},
     blockedGroups: Array.isArray(value.blockedGroups) ? [...new Set(value.blockedGroups.map(String).filter((id) => /^-?\d{1,20}$/.test(id)))].slice(-2_000) : [],
     leftGroups: Array.isArray(value.leftGroups) ? [...new Set(value.leftGroups.map(String).filter((id) => /^-?\d{1,20}$/.test(id)))].slice(-2_000) : [],
     channels: Array.isArray(value.channels) ? value.channels.slice(0, 300) : [],
@@ -1925,6 +2040,10 @@ class ForwardSchedulerRuntime {
 
   async #handleCallback(state, callback) {
     const data = asText(callback.data);
+    if (data.startsWith("help:")) {
+      await this.#handleHelpCallback(state, callback);
+      return;
+    }
     if (data.startsWith("captcha:")) {
       await this.#handleCaptchaCallback(state, callback);
       return;
@@ -2210,7 +2329,7 @@ class ForwardSchedulerRuntime {
     }
   }
 
-  async #handleNewMembers(state, message) {
+  async #handleNewMembers(state, message, joinContext = {}) {
     const db = this.#db(state);
     if (!db) return;
     const welcomeFeature = db.features?.welcome || {};
@@ -2220,12 +2339,15 @@ class ForwardSchedulerRuntime {
     const now = Date.now();
     const raidEnabled = this.#featureEnabled(state, "raidProtection", chatId);
     const dedup = state.welcomeDedup || (state.welcomeDedup = {});
+    const inviteSource = Boolean(joinContext.inviteLink || joinContext.viaChatFolderInviteLink || joinContext.viaJoinRequest);
     const members = (message.new_chat_members || []).filter((member) => {
       if (!member || member.is_bot || !member.id) return false;
       const key = `${chatId}:${member.id}`;
       const last = Number(dedup[key] || 0);
-      if (now - last < 60_000) return false;
-      dedup[key] = now;
+      const duplicate = now - last < 60_000;
+      const inviteRetryForWelcome = inviteSource && !state.welcomeDelivered?.[key];
+      if (duplicate && !inviteRetryForWelcome) return false;
+      if (!duplicate) dedup[key] = now;
       return true;
     });
     for (const [key, stamp] of Object.entries(dedup)) if (now - Number(stamp || 0) > 3_600_000) delete dedup[key];
@@ -2254,6 +2376,11 @@ class ForwardSchedulerRuntime {
     for (const member of members) {
       this.#rememberKnownMember(state, message.chat, member);
       const key = `${chatId}:${member.id}`;
+      if (state.groupModerationLists?.[chatId]?.banned?.[String(member.id)]) {
+        const reban = await this.#telegram(state, "banChatMember", { chat_id: message.chat.id, user_id: Number(member.id), revoke_messages: true }, { bypassLocalRate: true });
+        console.log(JSON.stringify({ event: "persistent_group_ban_reapplied", chatId, userId: String(member.id), ok: Boolean(reban.ok) }));
+        continue;
+      }
       if (captchaRequired && !state.pendingVerifications[key]) {
         const canRestrict = await this.#botPermission(state, chatId, "can_restrict_members");
         if (canRestrict !== true) {
@@ -2290,12 +2417,25 @@ class ForwardSchedulerRuntime {
         }
         }
       }
-      if (this.#featureEnabled(state, "welcome", chatId)) {
-        const text = asText(welcomeFeature.text || this.#text(state, "welcome", "Welcome, {name}!"));
-        await this.#send(message.chat.id, renderTemplate(text, {
-          name: userDisplay(member), username: member.username ? `@${member.username}` : "",
-          id: member.id, chat: message.chat.title || "Group",
-        }), state, {}, { group: true });
+      const welcomeKey = `${chatId}:${member.id}`;
+      const inviteOnly = welcomeFeature.onlyViaInviteLink !== false;
+      const hasInviteSource = Boolean(joinContext.inviteLink || joinContext.viaChatFolderInviteLink || joinContext.viaJoinRequest);
+      const alreadyQueued = (state.welcomeQueue || []).some((item) => String(item.chatId) === chatId && String(item.member?.id) === String(member.id));
+      if (this.#featureEnabled(state, "welcome", chatId) && (!inviteOnly || hasInviteSource) && !state.welcomeDelivered[welcomeKey] && !alreadyQueued) {
+        const groupSettings = state.groupSettings[chatId] ||= {};
+        const delaySeconds = clampNumber(groupSettings.welcomeDelaySeconds ?? welcomeFeature.delaySeconds, 0, 0, 3_600);
+        state.welcomeQueue ||= [];
+        state.welcomeQueue.push({
+          id: `${chatId}:${member.id}:${now}`,
+          chatId: String(message.chat.id),
+          chatTitle: message.chat.title || "Group",
+          member: { id: String(member.id), first_name: member.first_name || "", last_name: member.last_name || "", username: member.username || "" },
+          inviteLink: joinContext.inviteLink || "",
+          dueAt: now + delaySeconds * 1_000,
+          queuedAt: now,
+        });
+        state.welcomeQueue = state.welcomeQueue.slice(-2_000);
+        console.log(JSON.stringify({ event: "welcome_message_queued", chatId, userId: String(member.id), delaySeconds, inviteSource: hasInviteSource }));
       }
     }
     await this.#save(state);
@@ -2466,6 +2606,429 @@ class ForwardSchedulerRuntime {
     return true;
   }
 
+  #moderationStore(state, chatId) {
+    const id = String(chatId);
+    state.groupModerationLists ||= {};
+    state.groupModerationLists[id] ||= { silent: {}, banned: {} };
+    state.groupModerationLists[id].silent ||= {};
+    state.groupModerationLists[id].banned ||= {};
+    return state.groupModerationLists[id];
+  }
+
+  async #resolveCommandTarget(state, message, argumentText) {
+    const chatId = String(message.chat?.id || "");
+    const text = asText(argumentText);
+    const entities = [...(message.entities || []), ...(message.caption_entities || [])];
+    const textMention = entities.find((entity) => entity.type === "text_mention" && entity.user?.id);
+    if (textMention?.user) return { user: textMention.user, source: "text_mention" };
+    const numeric = text.match(/(?:^|\s)(\d{1,20})(?:$|\s)/);
+    if (numeric) return { user: { id: Number(numeric[1]), first_name: numeric[1] }, source: "numeric_id" };
+    const usernameMatch = text.match(/@([A-Za-z][A-Za-z0-9_]{4,31})/);
+    if (usernameMatch) {
+      const username = usernameMatch[1].toLowerCase();
+      const known = (state.knownMembers?.[chatId] || []).find((item) => String(item.username || "").toLowerCase() === username);
+      if (known) return { user: { id: Number(known.id), first_name: known.firstName || username, last_name: known.lastName || "", username: known.username }, source: "known_username" };
+      return { user: null, error: "این یوزرنیم هنوز در پیام‌های گروه توسط ربات شناسایی نشده است. برای این کاربر ریپلای کنید، از منشن مستقیم تلگرام استفاده کنید یا آیدی عددی را بدهید." };
+    }
+    const replyUser = message.reply_to_message?.from;
+    if (replyUser?.id) return { user: replyUser, source: "reply" };
+    return { user: null, error: "کاربر هدف مشخص نیست. روی پیام او ریپلای کنید یا یوزرنیم، منشن یا آیدی عددی را وارد کنید." };
+  }
+
+  async #sendHelp(state, chatId, sectionId = "", commandId = "", messageId = null) {
+    const db = this.#db(state) || {};
+    const sections = Array.isArray(db.help?.sections) ? db.help.sections : [];
+    const commands = new Map((db.commands || []).filter((item) => databaseCommandEnabled(item, db)).map((item) => [String(item.id), item]));
+    let text = "";
+    let keyboard = [];
+    if (commandId) {
+      const definition = commands.get(commandId);
+      if (!definition) return this.#send(chatId, "این دستور در دیتابیس فعال نیست.", state, {}, { group: isGroup({ type: "group" }) });
+      const aliases = (definition.aliases || []).map((alias) => `<code>${escapeHtml(alias)}</code>`).join("  •  ");
+      const slash = (definition.slashCommands || []).map((name) => `<code>/${escapeHtml(name)}</code>`).join("  ");
+      text = `<b>${escapeHtml(definition.title || definition.labelFa || definition.id)}</b>\n━━━━━━━━━━━━━━\n${escapeHtml(definition.descriptionFa || definition.description || "")}`;
+      if (aliases) text += `\n\n<b>دستورات:</b>\n${aliases}`;
+      if (slash) text += `\n\n<b>فرمان منو:</b>\n${slash}`;
+      if (definition.usage) text += `\n\n<b>نحوه استفاده:</b>\n<code>${escapeHtml(definition.usage)}</code>`;
+      if (definition.notes) text += `\n\n${escapeHtml(definition.notes)}`;
+      const parent = String(definition.section || sectionId || "");
+      keyboard = [[button("⬅️ بازگشت به بخش", `help:section:${parent}`, "primary"), button("🏠 راهنمای اصلی", "help:home", "success")]];
+    } else if (sectionId) {
+      const section = sections.find((item) => String(item.id) === sectionId);
+      if (!section) return this.#send(chatId, "بخش موردنظر پیدا نشد.", state);
+      text = `<b>${escapeHtml(section.title || "راهنما")}</b>\n━━━━━━━━━━━━━━\n${escapeHtml(section.description || "")}`;
+      const rows = [];
+      for (const id of section.commands || []) {
+        const item = commands.get(String(id));
+        if (!item) continue;
+        rows.push(button(String(item.buttonLabel || item.title || item.labelFa || item.id).slice(0, 60), `help:command:${item.id}:${section.id}`, item.color || "primary"));
+      }
+      for (let index = 0; index < rows.length; index += 2) keyboard.push(rows.slice(index, index + 2));
+      keyboard.push([button("⬅️ بازگشت", "help:home", "success")]);
+    } else {
+      const activeSections = sections.filter((section) => (section.commands || []).some((id) => commands.has(String(id))));
+      text = `<b>${escapeHtml(db.help?.title || "راهنمای مدیریت گروه")}</b>\n━━━━━━━━━━━━━━\n${escapeHtml(db.help?.intro || "برای مشاهده توضیحات هر بخش، دکمه مربوط را انتخاب کنید.")}\n\n<b>📌 راهنما کاملاً از دیتابیس ساخته می‌شود.</b>`;
+      const rows = [];
+      for (const section of activeSections) rows.push(button(section.buttonLabel || section.title, `help:section:${section.id}`, section.color || "primary"));
+      for (let index = 0; index < rows.length; index += 2) keyboard.push(rows.slice(index, index + 2));
+      const helpCommand = (db.commands || []).find((item) => item.id === "help");
+      if (helpCommand) keyboard.push([button("🔄 بروزرسانی راهنما", "help:home", "success")]);
+    }
+    const extra = { reply_markup: { inline_keyboard: keyboard }, parse_mode: "HTML", link_preview_options: { is_disabled: true } };
+    if (messageId) {
+      return this.#telegram(state, "editMessageText", { chat_id: chatId, message_id: messageId, text: text.slice(0, 3_900), ...extra }, { bypassLocalRate: true });
+    }
+    return this.#send(chatId, text.slice(0, 3_900), state, extra, { group: true });
+  }
+
+  async #handleHelpCallback(state, callback) {
+    const data = asText(callback.data);
+    const chatId = callback.message?.chat?.id;
+    await this.#answerCallback(callback.id);
+    if (!chatId || !callback.message?.message_id) return;
+    if (data === "help:home") return this.#sendHelp(state, chatId, "", "", callback.message.message_id);
+    if (data.startsWith("help:section:")) return this.#sendHelp(state, chatId, data.slice("help:section:".length), "", callback.message.message_id);
+    if (data.startsWith("help:command:")) {
+      const parts = data.split(":");
+      return this.#sendHelp(state, chatId, parts[3] || "", parts[2] || "", callback.message.message_id);
+    }
+  }
+
+  async #handleProfileInfo(state, message, argumentText) {
+    const resolved = await this.#resolveCommandTarget(state, message, argumentText);
+    if (!resolved.user) {
+      await this.#reply(message, `⚠️ ${escapeHtml(resolved.error)}`, state);
+      return true;
+    }
+    const userId = Number(resolved.user.id);
+    const [member, photos, audios, privateChat] = await Promise.all([
+      this.#telegram(state, "getChatMember", { chat_id: message.chat.id, user_id: userId }, { bypassLocalRate: true }),
+      this.#telegram(state, "getUserProfilePhotos", { user_id: userId, offset: 0, limit: 1 }, { bypassLocalRate: true }),
+      this.#telegram(state, "getUserProfileAudios", { user_id: userId, offset: 0, limit: 1 }, { bypassLocalRate: true }),
+      this.#telegram(state, "getChat", { chat_id: userId }, { bypassLocalRate: true }),
+    ]);
+    const user = member.ok ? member.result?.user || resolved.user : resolved.user;
+    const privateInfo = privateChat.ok ? privateChat.result || {} : {};
+    const photoCount = Number(photos.ok ? photos.result?.total_count || 0 : 0);
+    const audioCount = Number(audios.ok ? audios.result?.total_count || 0 : 0);
+    const status = member.ok ? String(member.result?.status || "unknown") : "در دسترس نیست";
+    const statusFa = ({ creator: "مالک گروه", administrator: "مدیر", member: "عضو", restricted: "محدودشده", left: "خارج از گروه", kicked: "مسدود" })[status] || status;
+    const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ") || String(userId);
+    const bio = asText(privateInfo.bio).slice(0, 500);
+    const personalChat = privateInfo.personal_chat && typeof privateInfo.personal_chat === "object" ? privateInfo.personal_chat : null;
+    const personalChatName = personalChat
+      ? [personalChat.title, personalChat.username ? `@${personalChat.username}` : ""].filter(Boolean).join(" · ") || String(personalChat.id || "")
+      : "در دسترس نیست";
+    const premium = user.is_premium === true ? "فعال" : user.is_premium === false ? "غیرفعال" : "نامشخص";
+    const text = [
+      "<b>👤 اطلاعات کاربر</b>", "━━━━━━━━━━━━━━",
+      `<b>نام:</b> ${escapeHtml(fullName)}`,
+      `<b>یوزرنیم:</b> ${user.username ? `@${escapeHtml(user.username)}` : "ندارد"}`,
+      `<b>آیدی عددی:</b> <code>${userId}</code>`,
+      `<b>وضعیت در گروه:</b> ${escapeHtml(statusFa)}`,
+      `<b>تلگرام پرمیوم:</b> ${premium}`,
+      `<b>تعداد عکس‌های پروفایل:</b> ${photoCount}`,
+      `<b>تعداد صداهای پروفایل:</b> ${audios.ok ? audioCount : "در دسترس نیست"}`,
+      `<b>بیو:</b> ${bio ? escapeHtml(bio) : "در چت خصوصی قابل‌دسترسی نیست"}`,
+      `<b>کانال شخصی:</b> ${escapeHtml(personalChatName)}`,
+    ].join("\n");
+    const latestPhoto = photos.ok && photos.result?.photos?.[0]?.length ? photos.result.photos[0].at(-1)?.file_id : "";
+    const buttons = [{ text: "🔎 مشاهده پروفایل", url: `tg://user?id=${userId}`, style: "primary" }];
+    if (personalChat?.username) buttons.push({ text: "📣 کانال شخصی", url: `https://t.me/${encodeURIComponent(personalChat.username)}`, style: "success" });
+    const keyboard = { inline_keyboard: [buttons] };
+    if (latestPhoto) {
+      const sent = await this.#telegram(state, "sendPhoto", { chat_id: message.chat.id, photo: latestPhoto, caption: text.slice(0, 1_000), parse_mode: "HTML", reply_markup: keyboard }, { group: true });
+      if (!sent.ok) await this.#reply(message, text, state);
+    } else {
+      await this.#send(message.chat.id, text, state, { reply_markup: keyboard }, { group: true });
+    }
+    return true;
+  }
+
+  async #handleModerationCommand(state, message, definition, argumentText) {
+    const chatId = String(message.chat.id);
+    const handler = String(definition.handler);
+    const store = this.#moderationStore(state, chatId);
+    const kind = handler.includes("silent") || handler === "moderation.silence" || handler === "moderation.unsilence" ? "silent" : "banned";
+    const isList = handler.endsWith("_list") && !handler.startsWith("moderation.clean_");
+    const isClean = handler.startsWith("moderation.clean_");
+    const label = kind === "silent" ? "فهرست سکوت" : "فهرست بن";
+    if (isList) {
+      const entries = Object.values(store[kind]).sort((a, b) => Number(b.addedAt || 0) - Number(a.addedAt || 0));
+      const displayLimit = 24;
+      const lines = entries.slice(0, displayLimit).map((item, index) => {
+        const displayName = String(item.name || item.username || item.id).slice(0, 28);
+        return `${index + 1}. <a href="tg://user?id=${Number(item.id)}">${escapeHtml(displayName)}</a> <code>${escapeHtml(item.id)}</code>`;
+      });
+      const body = `<b>${kind === "silent" ? "🔇" : "⛔"} ${label}</b>\n━━━━━━━━━━━━━━\nتعداد: <b>${entries.length}</b>\n\n${lines.length ? lines.join("\n") : "<i>این فهرست خالی است.</i>"}${entries.length > displayLimit ? `\n\n<i>${displayLimit} مورد از ${entries.length} مورد نمایش داده شد.</i>` : ""}`;
+      await this.#reply(message, body, state);
+      return true;
+    }
+    if (isClean) {
+      const entries = Object.values(store[kind]);
+      if (!entries.length) {
+        await this.#reply(message, `✅ ${label} از قبل خالی است.`, state);
+        return true;
+      }
+      let success = 0;
+      let failed = 0;
+      for (const item of entries) {
+        const userId = Number(item.id);
+        const result = kind === "silent"
+          ? await this.#telegram(state, "restrictChatMember", { chat_id: Number(chatId), user_id: userId, permissions: { can_send_messages: true, can_send_audios: true, can_send_documents: true, can_send_photos: true, can_send_videos: true, can_send_video_notes: true, can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true, can_add_web_page_previews: true }, use_independent_chat_permissions: true }, { bypassLocalRate: true })
+          : await this.#telegram(state, "unbanChatMember", { chat_id: Number(chatId), user_id: userId, only_if_banned: true }, { bypassLocalRate: true });
+        if (result.ok) { delete store[kind][String(userId)]; success += 1; }
+        else failed += 1;
+        if ((success + failed) % 12 === 0) await sleep(120);
+      }
+      await this.#save(state);
+      await this.#reply(message, `<b>🧹 پاکسازی انجام شد.</b>\nفهرست: ${label}\nموفق: <b>${success}</b>\nناموفق: <b>${failed}</b>`, state);
+      return true;
+    }
+
+    const resolved = await this.#resolveCommandTarget(state, message, argumentText);
+    if (!resolved.user?.id) {
+      await this.#reply(message, `⚠️ ${escapeHtml(resolved.error || "کاربر هدف مشخص نیست.")}`, state);
+      return true;
+    }
+    const target = resolved.user;
+    const userId = Number(target.id);
+    if (!Number.isSafeInteger(userId) || userId <= 0 || target.is_bot || this.#isOwner(userId, state)
+      || (this.#db(state)?.roles?.protectedIds || []).map(String).includes(String(userId))) {
+      await this.#reply(message, "⛔ این کاربر در فهرست محافظت‌شده قرار دارد یا هدف معتبر نیست.", state);
+      return true;
+    }
+    const targetMember = await this.#telegram(state, "getChatMember", { chat_id: Number(chatId), user_id: userId }, { bypassLocalRate: true });
+    if (targetMember.ok && ["creator", "administrator"].includes(targetMember.result?.status)) {
+      await this.#reply(message, "⛔ امکان مدیریت مالک یا مدیران گروه وجود ندارد.", state);
+      return true;
+    }
+    const required = await this.#botPermission(state, Number(chatId), "can_restrict_members");
+    if (required !== true) {
+      await this.#reply(message, "⛔ ربات باید در گروه مدیر باشد و دسترسی Restrict Members داشته باشد.", state);
+      return true;
+    }
+
+    let result;
+    if (handler === "moderation.silence") {
+      if (!targetMember.ok || !["member", "restricted"].includes(targetMember.result?.status)) {
+        await this.#reply(message, "⚠️ برای سکوت، کاربر باید عضو فعلی گروه باشد.", state);
+        return true;
+      }
+      result = await this.#telegram(state, "restrictChatMember", {
+        chat_id: Number(chatId), user_id: userId,
+        permissions: { can_send_messages: false, can_send_audios: false, can_send_documents: false, can_send_photos: false, can_send_videos: false, can_send_video_notes: false, can_send_voice_notes: false, can_send_polls: false, can_send_other_messages: false, can_add_web_page_previews: false },
+        use_independent_chat_permissions: true,
+      }, { bypassLocalRate: true });
+      if (result.ok) store.silent[String(userId)] = { id: String(userId), name: [target.first_name, target.last_name].filter(Boolean).join(" ") || String(userId), username: target.username || "", addedAt: Date.now(), by: String(message.from?.id || "") };
+    } else if (handler === "moderation.unsilence") {
+      result = await this.#telegram(state, "restrictChatMember", {
+        chat_id: Number(chatId), user_id: userId,
+        permissions: { can_send_messages: true, can_send_audios: true, can_send_documents: true, can_send_photos: true, can_send_videos: true, can_send_video_notes: true, can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true, can_add_web_page_previews: true },
+        use_independent_chat_permissions: true,
+      }, { bypassLocalRate: true });
+      if (result.ok) delete store.silent[String(userId)];
+    } else if (handler === "moderation.ban") {
+      result = await this.#telegram(state, "banChatMember", { chat_id: Number(chatId), user_id: userId, revoke_messages: true }, { bypassLocalRate: true });
+      if (result.ok) store.banned[String(userId)] = { id: String(userId), name: [target.first_name, target.last_name].filter(Boolean).join(" ") || String(userId), username: target.username || "", addedAt: Date.now(), by: String(message.from?.id || "") };
+    } else if (handler === "moderation.unban") {
+      result = await this.#telegram(state, "unbanChatMember", { chat_id: Number(chatId), user_id: userId, only_if_banned: true }, { bypassLocalRate: true });
+      if (result.ok) delete store.banned[String(userId)];
+    } else return false;
+
+    await this.#save(state);
+    const actionText = handler === "moderation.silence" ? "سکوت شد" : handler === "moderation.unsilence" ? "از سکوت خارج شد" : handler === "moderation.ban" ? "بن شد" : "از بن خارج شد";
+    await this.#reply(message, result?.ok
+      ? `✅ <b>${escapeHtml(target.first_name || target.username || userId)}</b> ${actionText}.`
+      : `❌ عملیات انجام نشد.\n<code>${escapeHtml(result?.description || "Telegram API error")}</code>`, state);
+    return true;
+  }
+
+  async #handleWelcomeCommand(state, message, definition, argumentText) {
+    const chatId = String(message.chat.id);
+    const handler = String(definition.handler);
+    const globalEnabled = isModuleEnabled(this.#db(state), "welcome");
+    if (!globalEnabled) {
+      await this.#reply(message, "⛔ قابلیت خوش‌آمدگویی در دیتابیس غیرفعال است.", state);
+      return true;
+    }
+    const operator = this.#isOwner(message.from?.id, state) || await this.#isTelegramAdmin(state, message.from?.id, message.chat.id);
+    if (!operator) {
+      await this.#reply(message, "⛔ این دستور فقط برای مدیران گروه است.", state);
+      return true;
+    }
+    const settings = state.groupSettings[chatId] ||= {};
+    if (handler === "welcome.on" || handler === "welcome.off") {
+      state.groupModuleOverrides[chatId] ||= {};
+      state.groupModuleOverrides[chatId].welcome = handler === "welcome.on";
+      await this.#save(state);
+      await this.#reply(message, handler === "welcome.on" ? "🟢 <b>خوش‌آمدگویی فعال شد.</b>" : "🔴 <b>خوش‌آمدگویی غیرفعال شد.</b>", state);
+    } else if (handler === "welcome.set") {
+      const value = asText(argumentText || message.reply_to_message?.text || message.reply_to_message?.caption);
+      if (!value) {
+        await this.#reply(message, "✍️ متن جدید را بعد از دستور تنظیم خوشامد بنویسید یا روی متن موردنظر ریپلای کنید.", state);
+        return true;
+      }
+      settings.welcomeText = value.slice(0, 3_500);
+      await this.#save(state);
+      await this.#reply(message, "✅ متن خوش‌آمدگویی این گروه ذخیره شد.", state);
+    } else if (handler === "welcome.get") {
+      const value = settings.welcomeText || this.#db(state).features.welcome.text || this.#text(state, "welcome", "سلام !mention به گروه !groupname خوش آمدی!");
+      const media = settings.welcomeMedia ? `\n🖼 رسانه: <b>${escapeHtml(settings.welcomeMedia.type)}</b>` : "\n🖼 رسانه: <i>تنظیم نشده</i>";
+      await this.#reply(message, `<b>متن خوش‌آمد فعلی:</b>\n${escapeHtml(value)}${media}\n⏱ زمان تأخیر: ${Number(settings.welcomeDelaySeconds || 0)} ثانیه`, state);
+    } else if (handler === "welcome.reset") {
+      delete settings.welcomeText;
+      delete settings.welcomeMedia;
+      delete settings.welcomeDelaySeconds;
+      await this.#save(state);
+      await this.#reply(message, "✅ تنظیمات خوش‌آمدگویی به مقادیر پیش‌فرض دیتابیس بازگشت.", state);
+    } else if (handler === "welcome.set_time") {
+      const normalizedDigits = asText(argumentText)
+        .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
+        .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)));
+      const seconds = Number(normalizedDigits.match(/\d{1,4}/)?.[0]);
+      if (!Number.isInteger(seconds) || seconds < 0 || seconds > 3_600) {
+        await this.#reply(message, "⚠️ زمان را به ثانیه و بین ۰ تا ۳۶۰۰ وارد کنید. نمونه: تنظیم زمان خوشامد 30", state);
+        return true;
+      }
+      settings.welcomeDelaySeconds = seconds;
+      await this.#save(state);
+      await this.#reply(message, `✅ زمان خوش‌آمدگویی روی <b>${seconds}</b> ثانیه تنظیم شد.`, state);
+    } else if (handler === "welcome.set_media") {
+      const source = message.reply_to_message || message;
+      const media = getWelcomeMediaFromMessage(source);
+      if (!media?.fileId) {
+        await this.#reply(message, "⚠️ دستور را روی عکس، ویدئو، آهنگ، ویس، گیف، استیکر یا ویدئوی سلفی ریپلای کنید؛ یا دستور را به‌عنوان کپشن همان رسانه بفرستید.", state);
+        return true;
+      }
+      settings.welcomeMedia = media;
+      await this.#save(state);
+      await this.#reply(message, `✅ رسانه خوش‌آمدگویی ذخیره شد: <b>${escapeHtml(media.type)}</b>`, state);
+    }
+    return true;
+  }
+
+  async #handleDatabaseCommand(state, message, db) {
+    const match = matchDatabaseCommand(message.text || message.caption || "", db);
+    if (!match) return false;
+    const definition = match.definition;
+    const handler = String(definition.handler || "");
+    if (handler === "help") {
+      await this.#sendHelp(state, message.chat.id);
+      return true;
+    }
+    if (handler === "profile.info") return this.#handleProfileInfo(state, message, match.argumentText);
+    if (handler.startsWith("welcome.")) return this.#handleWelcomeCommand(state, message, definition, match.argumentText);
+    if (handler.startsWith("moderation.")) {
+      if (!this.#featureEnabled(state, "moderation", message.chat.id)) {
+        await this.#reply(message, "⛔ مدیریت گروه در دیتابیس غیرفعال است.", state);
+        return true;
+      }
+      const operator = this.#isOwner(message.from?.id, state) || await this.#isTelegramAdmin(state, message.from?.id, message.chat.id);
+      if (!operator) {
+        await this.#reply(message, this.#text(state, "group.adminOnly", "⛔ این دستور فقط برای مدیران واقعی گروه فعال است."), state);
+        return true;
+      }
+      return this.#handleModerationCommand(state, message, definition, match.argumentText);
+    }
+    return false;
+  }
+
+  async #renderWelcome(task, state, db) {
+    const chatResult = await this.#telegram(state, "getChat", { chat_id: Number(task.chatId) }, { bypassLocalRate: true });
+    const chatName = chatResult.ok ? chatResult.result?.title || task.chatTitle : task.chatTitle;
+    const inviteLink = task.inviteLink || (chatResult.ok ? chatResult.result?.invite_link || "" : "");
+    const member = task.member || {};
+    const fullName = [member.first_name, member.last_name].filter(Boolean).join(" ") || String(member.id);
+    const mention = `<a href="tg://user?id=${Number(member.id)}">${escapeHtml(fullName)}</a>`;
+    const date = new Intl.DateTimeFormat("fa-IR", { timeZone: "Asia/Tehran", dateStyle: "long" }).format(new Date());
+    const time = new Intl.DateTimeFormat("fa-IR", { timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit" }).format(new Date());
+    const rules = state.groupSettings[String(task.chatId)]?.rules || db.groupSettings?.rules || "";
+    const values = {
+      name: escapeHtml(fullName), username: member.username ? `@${escapeHtml(member.username)}` : "",
+      id: escapeHtml(member.id), chat: escapeHtml(chatName), mention, firstname: escapeHtml(member.first_name || ""),
+      lastname: escapeHtml(member.last_name || ""), grouplink: escapeHtml(inviteLink), grouprules: escapeHtml(rules),
+      groupname: escapeHtml(chatName), date: escapeHtml(date), time: escapeHtml(time),
+      emoji: ["🌸", "🌿", "✨", "💎", "🌈", "🦋", "☀️", "🎉"][Math.floor(Math.random() * 8)],
+    };
+    const template = state.groupSettings[String(task.chatId)]?.welcomeText || db.features?.welcome?.text || "سلام !mention به گروه !groupname خوش آمدی!";
+    let rendered = renderTemplate(template, values);
+    const tokens = {
+      "!mention": values.mention, "منشن_کاربر": values.mention,
+      "!firstname": values.firstname, "نام_کاربر": values.firstname,
+      "!lastname": values.lastname, "فامیل_کاربر": values.lastname,
+      "!username": values.username, "آیدی_کاربر": values.username,
+      "!userid": values.id, "آیدی_عددی_کاربر": values.id,
+      "!grouplink": values.grouplink, "لینک_گروه": values.grouplink,
+      "!grouprules": values.grouprules, "قوانین_گروه": values.grouprules,
+      "!groupname": values.groupname, "نام_گروه": values.groupname,
+      "!date": values.date, "زمان_تاریخ": values.date,
+      "!time": values.time, "زمان_ساعت": values.time,
+      "!emoji": values.emoji, "ایموجی_خودکار": values.emoji,
+    };
+    for (const [token, value] of Object.entries(tokens)) rendered = rendered.split(token).join(value);
+    return rendered;
+  }
+
+  async #runWelcomeQueue(state, now = Date.now()) {
+    const queue = Array.isArray(state.welcomeQueue) ? state.welcomeQueue : [];
+    const due = queue.filter((item) => Number(item.dueAt || 0) <= now).slice(0, 50);
+    state.welcomeQueue = queue.filter((item) => Number(item.dueAt || 0) > now);
+    if (!due.length) return;
+    const db = this.#db(state);
+    for (const task of due) {
+      const chatId = String(task.chatId);
+      const userId = String(task.member?.id || "");
+      const deliveredKey = `${chatId}:${userId}`;
+      if (!this.#featureEnabled(state, "welcome", chatId) || state.welcomeDelivered?.[deliveredKey]) continue;
+      const text = await this.#renderWelcome(task, state, db);
+      const media = state.groupSettings[chatId]?.welcomeMedia || db.features?.welcome?.media || null;
+      let delivered = false;
+      if (media?.fileId && ["photo", "video", "audio", "voice", "animation", "sticker", "video_note"].includes(media.type)) {
+        const field = media.type === "video_note" ? "video_note" : media.type;
+        const method = media.type === "video_note" ? "sendVideoNote" : media.type === "sticker" ? "sendSticker" : media.type === "animation" ? "sendAnimation" : media.type === "voice" ? "sendVoice" : media.type === "audio" ? "sendAudio" : media.type === "video" ? "sendVideo" : "sendPhoto";
+        const captionSupported = !["sticker", "video_note"].includes(media.type);
+        const payload = { chat_id: Number(task.chatId), [field]: media.fileId };
+        if (captionSupported && text.length <= 950) {
+          payload.caption = text;
+          payload.parse_mode = db.runtime?.telegram?.parseMode || "HTML";
+        }
+        const sent = await this.#telegram(state, method, payload, { group: true });
+        if (sent.ok) {
+          delivered = true;
+          if (!captionSupported || text.length > 950) {
+            const textSent = await this.#send(Number(task.chatId), text, state, {}, { group: true });
+            if (!textSent.ok) console.error(JSON.stringify({ event: "welcome_caption_fallback_failed", chatId, userId, reason: asText(textSent.description).slice(0, 120) }));
+          }
+        } else {
+          console.error(JSON.stringify({ event: "welcome_media_send_failed", chatId, userId, mediaType: media.type, reason: asText(sent.description).slice(0, 120) }));
+          const fallback = await this.#send(Number(task.chatId), text, state, {}, { group: true });
+          delivered = Boolean(fallback.ok);
+        }
+      } else {
+        const sent = await this.#send(Number(task.chatId), text, state, {}, { group: true });
+        delivered = Boolean(sent.ok);
+      }
+
+      if (delivered) {
+        state.welcomeDelivered[deliveredKey] = Date.now();
+        console.log(JSON.stringify({ event: "welcome_message_sent", chatId, userId, hasMedia: Boolean(media?.fileId) }));
+      } else {
+        const retries = Number(task.retries || 0);
+        if (retries < 3) {
+          state.welcomeQueue.push({ ...task, retries: retries + 1, dueAt: Date.now() + 60_000 });
+          console.error(JSON.stringify({ event: "welcome_message_retry_scheduled", chatId, userId, retry: retries + 1 }));
+        } else {
+          console.error(JSON.stringify({ event: "welcome_message_delivery_abandoned", chatId, userId, retries }));
+        }
+      }
+    }
+    state.welcomeQueue = state.welcomeQueue.slice(-2_000);
+    const deliveredEntries = Object.entries(state.welcomeDelivered || {}).sort((a, b) => Number(a[1]) - Number(b[1]));
+    if (deliveredEntries.length > 5_000) state.welcomeDelivered = Object.fromEntries(deliveredEntries.slice(-4_000));
+    await this.#save(state);
+  }
+
   async #replyAction(state, message, operator, db) {
     if (!operator || !this.#featureEnabled(state, "moderation", message.chat?.id) || !message.reply_to_message?.from || !message.text) return false;
     const parsed = parseCommand(message.text);
@@ -2615,6 +3178,13 @@ class ForwardSchedulerRuntime {
     const user = message.from || {};
     if (user.is_bot) return;
     this.#rememberKnownMember(state, chat, user);
+    const persistentBan = state.groupModerationLists?.[String(chat.id)]?.banned?.[String(user.id)];
+    if (persistentBan) {
+      const reban = await this.#telegram(state, "banChatMember", { chat_id: chat.id, user_id: Number(user.id), revoke_messages: true }, { bypassLocalRate: true });
+      console.log(JSON.stringify({ event: "persistent_group_ban_reapplied_from_message", chatId: String(chat.id), userId: String(user.id), ok: Boolean(reban.ok) }));
+      await this.#save(state);
+      return;
+    }
     const ownerOperator = this.#isOwner(user.id, state);
     const operator = this.#isOperator(user.id, chat.id, db, state) || await this.#isTelegramAdmin(state, user.id, chat.id);
     const botReplyFeature = db.features?.botReplyJokes || {};
@@ -2644,6 +3214,7 @@ class ForwardSchedulerRuntime {
     const trustedSender = operator || protectedSenderIds.includes(String(user.id));
 
     if (message.new_chat_members?.length) await this.#handleNewMembers(state, message);
+    if (await this.#handleDatabaseCommand(state, message, db)) return;
 
     const command = parseCommand(text);
     const reportCommand = configuredCommand(db.features?.reports?.command);
@@ -2992,7 +3563,7 @@ class ForwardSchedulerRuntime {
       if (this.#isOwner(callback.from?.id, state) && isPrivate(callback.message?.chat) && callbackData.startsWith("settings:")) {
         await this.#answerCallback(callback.id);
         await this.#handleSettingsCallback(state, callback);
-      } else if (callbackData.startsWith("captcha:") || callbackData.startsWith("group:bot:") || callbackData.startsWith("tag:")
+      } else if (callbackData.startsWith("help:") || callbackData.startsWith("captcha:") || callbackData.startsWith("group:bot:") || callbackData.startsWith("tag:")
         || callbackData.startsWith("g5:") || callbackData.startsWith("t5:")) {
         await this.#handleCallback(state, callback);
       } else {
@@ -3072,6 +3643,13 @@ class ForwardSchedulerRuntime {
       const oldStatus = memberUpdate.old_chat_member?.status;
       const newMember = memberUpdate.new_chat_member || {};
       if (["left", "kicked"].includes(newMember.status) && ["member", "restricted", "administrator", "creator"].includes(oldStatus)) {
+        const departedUserId = String(newMember.user?.id || "");
+        const departedKey = `${String(chat.id)}:${departedUserId}`;
+        if (departedUserId) {
+          delete state.welcomeDelivered[departedKey];
+          delete state.welcomeDedup[departedKey];
+          state.welcomeQueue = (state.welcomeQueue || []).filter((item) => !(String(item.chatId) === String(chat.id) && String(item.member?.id) === departedUserId));
+        }
         const anti = this.#db(state)?.features?.antiSpam || {};
         if (anti.signals?.joinLeaveBurst !== false) {
           const now = Date.now();
@@ -3101,7 +3679,19 @@ class ForwardSchedulerRuntime {
           await this.#send(chat.id, renderTemplate(goodbye.text || "👋 {name} left the group.", { name: userDisplay(newMember.user) }), state, {}, { group: true });
         }
       } else if (["member", "restricted"].includes(newMember.status) && ["left", "kicked"].includes(oldStatus)) {
-        await this.#handleNewMembers(state, { chat, new_chat_members: [newMember.user].filter(Boolean) });
+        const joinedUserId = String(newMember.user?.id || "");
+        const savedBan = state.groupModerationLists?.[String(chat.id)]?.banned?.[joinedUserId];
+        if (savedBan && joinedUserId) {
+          const reban = await this.#telegram(state, "banChatMember", { chat_id: chat.id, user_id: Number(joinedUserId), revoke_messages: true }, { bypassLocalRate: true });
+          console.log(JSON.stringify({ event: "persistent_group_ban_reapplied", chatId: String(chat.id), userId: joinedUserId, ok: Boolean(reban.ok) }));
+          await this.#save(state);
+        } else {
+          await this.#handleNewMembers(state, { chat, new_chat_members: [newMember.user].filter(Boolean) }, {
+            inviteLink: memberUpdate.invite_link?.invite_link || "",
+            viaChatFolderInviteLink: Boolean(memberUpdate.via_chat_folder_invite_link),
+            viaJoinRequest: Boolean(memberUpdate.via_join_request),
+          });
+        }
       }
     } else if (update?.chat_join_request) {
       const joinRequest = update.chat_join_request;
@@ -3141,6 +3731,8 @@ class ForwardSchedulerRuntime {
 
   async #scheduleNext(state) {
     const due = [];
+    const welcomeDue = (state.welcomeQueue || []).map((item) => Number(item.dueAt || 0)).filter((time) => time > 0);
+    if (welcomeDue.length) due.push(Math.min(...welcomeDue));
     const queueMeta = await this.ctx.storage.get("queue:v1:meta");
     if (Number(queueMeta?.pendingCount || 0) > 0) {
       const queuedRows = await this.ctx.storage.list({ prefix: "queue:v1:item:", limit: 512 });
@@ -3386,6 +3978,7 @@ class ForwardSchedulerRuntime {
     await this.#runForward(state, now);
     await this.#runChatter(state, now);
     await this.#expireVerifications(state, now);
+    await this.#runWelcomeQueue(state, now);
     await this.#scheduleNext(state);
   }
 
