@@ -1,9 +1,9 @@
 {
   "schemaVersion": 5,
-  "version": "5.4.16-modular-api-runtime",
+  "version": "5.4.17-registry-repair",
   "name": "MUNITOS Group Management Database",
   "language": "fa",
-  "description": "مدیریت گروه و کانال، پنل مالک، ارسال اختصاصی و پیام همگانی صف‌بندی‌شده با موتور ماژولار.",
+  "description": "مدیریت گروه و کانال با ثبت مطمئن عضویت، نگهداری مقصدهای کوچک، تشخیص عضویت مجدد و پنل مالک.",
   "runtime": {
     "telegram": {
       "parseMode": "HTML"
@@ -48,7 +48,10 @@
       "runtime.database.callback-router",
       "runtime.database.update-router",
       "runtime.database.command-action-dsl",
-      "runtime.database.telegram-api-gateway"
+      "runtime.database.telegram-api-gateway",
+      "owner.chat.registry.reliable-ingestion",
+      "owner.chat.registry.rejoin-recovery",
+      "owner.chat.registry.capture-while-paused"
     ],
     "cache": {
       "chatAnswerTtlSeconds": 0
@@ -1154,8 +1157,8 @@
       "callbacks": "owneradmin:*",
       "directSend": "implemented_copy_message_with_confirmation",
       "broadcast": "implemented_durable_queue_with_confirmation",
-      "registry": "group_messages_chat_member_chat_join_request_my_chat_member_channel_post",
-      "note": "پیام اختصاصی و همگانی در Worker پیاده‌سازی شده‌اند. مقصدهای جدید با رویدادهای قابل دریافت Telegram ثبت می‌شوند؛ Bot API امکان فهرست‌گیری یک‌جای تمام چت‌های قدیمی را ارائه نمی‌کند."
+      "registry": "my_chat_member + chat_member + chat_join_request + group messages + channel_post; registry capture remains enabled while bot features are paused",
+      "note": "هیچ حداقل تعداد عضو برای خروج خودکار وجود ندارد. عضویت مجدد، وضعیت left قدیمی را پاک می‌کند. ثبت تاریخی چت‌هایی که هیچ رویداد تازه‌ای تولید نکنند از Bot API قابل بازیابی یک‌جایی نیست."
     },
     "title": "مدیریت مرکزی ربات",
     "intro": "فهرست مقصدهای شناخته‌شده ربات. برای جزئیات و ارسال اختصاصی روی هر مقصد بزن؛ برای پیام همگانی از دکمه پایین استفاده کن. وضعیت عضویت و دسترسی‌های ربات جداگانه نمایش داده می‌شود.",
@@ -1179,7 +1182,8 @@
           "inviteLink",
           "botJoinState",
           "isBlocked",
-          "isLeft"
+          "isLeft",
+          "botIsMember"
         ],
         "usage": {
           "field": "targetUsage",
@@ -1206,7 +1210,8 @@
           "botStatus",
           "permissions",
           "rightsCheckedAt",
-          "lastSeenAt"
+          "lastSeenAt",
+          "botIsMember"
         ],
         "usage": {
           "field": "targetUsage",
@@ -1261,6 +1266,7 @@
       "id",
       "link",
       "username",
+      "botPresence",
       "description",
       "botStatus",
       "sendStatus",
@@ -1315,7 +1321,8 @@
       "slowModeDelay": "محدودیت سرعت ارسال",
       "linkedChatId": "شناسه مقصد متصل",
       "lastPostId": "شناسه آخرین پست",
-      "lastPostAt": "زمان آخرین پست"
+      "lastPostAt": "زمان آخرین پست",
+      "botPresence": "تأیید حضور فعلی ربات"
     },
     "text": {
       "planTitle": "انتخاب پلن",
@@ -1437,7 +1444,7 @@
         ]
       }
     ],
-    "registryNote": "ثبت مقصد از رویدادهای my_chat_member، chat_member، پیام‌های گروه و channel_post انجام می‌شود. مقصدهایی که پیش از نصب Worker جدید وجود داشته‌اند و هیچ رویداد تازه‌ای تولید نکنند، از طریق Bot API قابل کشف یک‌جایی نیستند؛ با دریافت اولین رویداد مجدداً ثبت می‌شوند.",
+    "registryNote": "فهرست مقصدها همه گروه‌ها و کانال‌های ثبت‌شده را نشان می‌دهد. عضویت گروه کوچک باعث خروج خودکار نمی‌شود؛ رویداد my_chat_member و هر پیام واقعی از گروه، وضعیت حضور ربات را به‌روزرسانی می‌کند. رکوردهای تأییدشده‌ی عضویت هنگام رسیدن به سقف ثبت، قبل از مقصدهای قدیمی/غیرفعال حذف می‌شوند. Bot API فهرست کامل تاریخی چت‌ها را ارائه نمی‌کند.",
     "refreshIntervalSeconds": 300,
     "directSend": {
       "enabled": true,
@@ -1463,5 +1470,31 @@
     }
   },
   "callbackRoutes": [],
-  "updateRoutes": []
+  "updateRoutes": [],
+  "groupRegistration": {
+    "enabled": true,
+    "captureWhenBotPaused": true,
+    "minimumMembers": 0,
+    "autoLeaveBelowMinimum": false,
+    "retainMembershipHistory": true,
+    "registrationEvents": [
+      "my_chat_member",
+      "chat_member",
+      "chat_join_request",
+      "message",
+      "edited_message",
+      "channel_post",
+      "edited_channel_post",
+      "callback_query"
+    ],
+    "membershipStates": [
+      "creator",
+      "administrator",
+      "member",
+      "restricted:is_member=true"
+    ],
+    "rejoinPolicy": "fresh_telegram_membership_event_clears_stale_left_marker",
+    "note": "هیچ حداقل تعداد عضوی برای خروج خودکار وجود ندارد. مقصدها با هر رویداد قابل دریافت ثبت می‌شوند. پیام جدید دریافت‌شده از گروه نیز نشانه حضور فعلی ربات است و وضعیت left قدیمی را پاک می‌کند.",
+    "prunePolicy": "evict_unverified_or_left_before_confirmed_current_members"
+  }
 }

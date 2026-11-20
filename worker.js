@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const DO_NAME = "forward-scheduler-owner";
-const BUILD_VERSION = "5.4.16-modular-runtime";
+const BUILD_VERSION = "5.4.17-registry-repair";
 const EMBEDDED_BOT_TOKEN = "9100041417:AAHYOpFKKTGpBQpdHoTAExwZYzlXPqOtSjg";
 const EMBEDDED_OWNER_TELEGRAM_ID = "8621035125";
 const EMBEDDED_WEBHOOK_SECRET = "fwd_scheduler_8621035125_5_4_0_telegram_edge";
@@ -424,6 +424,16 @@ function validateDatabase(database) {
     if (limits[field] != null && (!Number.isInteger(Number(limits[field])) || Number(limits[field]) < 1 || Number(limits[field]) > 5_000)) {
       throw new Error(`database_registry_limit_invalid:${field}`);
     }
+  }
+
+  const groupRegistration = database.groupRegistration ?? {};
+  if (!groupRegistration || typeof groupRegistration !== "object" || Array.isArray(groupRegistration)
+    || (groupRegistration.enabled != null && typeof groupRegistration.enabled !== "boolean")
+    || (groupRegistration.captureWhenBotPaused != null && typeof groupRegistration.captureWhenBotPaused !== "boolean")
+    || (groupRegistration.autoLeaveBelowMinimum != null && typeof groupRegistration.autoLeaveBelowMinimum !== "boolean")
+    || (groupRegistration.minimumMembers != null && (!Number.isInteger(Number(groupRegistration.minimumMembers))
+      || Number(groupRegistration.minimumMembers) < 0 || Number(groupRegistration.minimumMembers) > 100_000))) {
+    throw new Error("database_group_registration_invalid");
   }
 
   const capabilities = database.runtime?.capabilities ?? [];
@@ -1441,8 +1451,8 @@ function mergeState(value) {
         silent: lists?.silent && typeof lists.silent === "object" && !Array.isArray(lists.silent) ? Object.fromEntries(Object.entries(lists.silent).slice(-1_000)) : {},
         banned: lists?.banned && typeof lists.banned === "object" && !Array.isArray(lists.banned) ? Object.fromEntries(Object.entries(lists.banned).slice(-1_000)) : {},
       }])) : {},
-    blockedGroups: Array.isArray(value.blockedGroups) ? [...new Set(value.blockedGroups.map(String).filter((id) => /^-?\d{1,20}$/.test(id)))].slice(-2_000) : [],
-    leftGroups: Array.isArray(value.leftGroups) ? [...new Set(value.leftGroups.map(String).filter((id) => /^-?\d{1,20}$/.test(id)))].slice(-2_000) : [],
+    blockedGroups: Array.isArray(value.blockedGroups) ? [...new Set(value.blockedGroups.map(String).filter((id) => /^-?\d{1,20}$/.test(id)))].slice(-5_000) : [],
+    leftGroups: Array.isArray(value.leftGroups) ? [...new Set(value.leftGroups.map(String).filter((id) => /^-?\d{1,20}$/.test(id)))].slice(-5_000) : [],
     channels: Array.isArray(value.channels) ? value.channels.filter((item) => item && isTelegramId(String(item.id || ""))).slice(0, 5_000) : [],
     admins: {
       global: Array.isArray(value.admins?.global) ? [...new Set(value.admins.global.map(String).filter((id) => /^\d{1,20}$/.test(id)))].slice(0, 500) : [],
@@ -1489,7 +1499,7 @@ function mergeState(value) {
     tagOptOut: value.tagOptOut && typeof value.tagOptOut === "object" && !Array.isArray(value.tagOptOut) ? value.tagOptOut : {},
     tagDrafts: value.tagDrafts && typeof value.tagDrafts === "object" && !Array.isArray(value.tagDrafts) ? Object.fromEntries(Object.entries(value.tagDrafts).slice(-100)) : {},
     tagCooldowns: value.tagCooldowns && typeof value.tagCooldowns === "object" && !Array.isArray(value.tagCooldowns) ? Object.fromEntries(Object.entries(value.tagCooldowns).slice(-500)) : {},
-    botJoinState: value.botJoinState && typeof value.botJoinState === "object" && !Array.isArray(value.botJoinState) ? Object.fromEntries(Object.entries(value.botJoinState).slice(-500)) : {},
+    botJoinState: value.botJoinState && typeof value.botJoinState === "object" && !Array.isArray(value.botJoinState) ? Object.fromEntries(Object.entries(value.botJoinState).slice(-5_000)) : {},
     securityAudit: Array.isArray(value.securityAudit) ? value.securityAudit.slice(-500) : [],
     securityAlerts: value.securityAlerts && typeof value.securityAlerts === "object" && !Array.isArray(value.securityAlerts) ? value.securityAlerts : {},
     chatActivity: value.chatActivity && typeof value.chatActivity === "object" && !Array.isArray(value.chatActivity) ? value.chatActivity : {},
@@ -2608,7 +2618,7 @@ class ForwardSchedulerRuntime {
     return { shouldSend, eventCount: state.securityAlerts[key].eventCount };
   }
 
-  async #trackGroup(state, chat, botMember = null) {
+  async #trackGroup(state, chat, botMember = null, observedInChat = false) {
     if (!isGroup(chat) || !chat.id) return;
     const id = String(chat.id);
     const old = state.groups[id] || {};
@@ -2635,7 +2645,12 @@ class ForwardSchedulerRuntime {
       username: chat.username || old.username || null,
       type: chat.type || old.type || "supergroup",
       link: chat.username ? `https://t.me/${chat.username}` : (old.link || null),
-      botStatus: botMember?.status || old.botStatus || "unknown",
+      botStatus: observedInChat && ["left", "kicked"].includes(String(botMember?.status || old.botStatus || "").toLowerCase())
+        ? "member" : botMember?.status || old.botStatus || "unknown",
+      botIsMember: observedInChat ? true : botMember
+        ? (["creator", "administrator", "member"].includes(String(botMember.status || "").toLowerCase())
+          || (String(botMember.status || "").toLowerCase() === "restricted" && botMember.is_member === true))
+        : (typeof old.botIsMember === "boolean" ? old.botIsMember : null),
       rights,
       permissions: chat.permissions && typeof chat.permissions === "object" ? chat.permissions : (old.permissions || null),
       rightsCheckedAt: botMember ? Date.now() : Number(old.rightsCheckedAt || 0),
@@ -2657,8 +2672,13 @@ class ForwardSchedulerRuntime {
     const maxRegisteredGroups = clampNumber(this.#db(state)?.limits?.maxRegisteredGroups, 500, 1, 5_000);
     if (Object.keys(state.groups).length > maxRegisteredGroups) {
       const candidates = Object.entries(state.groups)
-        .filter(([groupId]) => !state.blockedGroups.includes(groupId) && !state.leftGroups.includes(groupId))
-        .sort((a, b) => Number(a[1].lastSeenAt || 0) - Number(b[1].lastSeenAt || 0));
+        .filter(([groupId]) => !state.blockedGroups.includes(groupId))
+        .sort((a, b) => {
+          const aPresent = a[1].botIsMember === true || ["creator", "administrator", "member"].includes(String(a[1].botStatus || "").toLowerCase());
+          const bPresent = b[1].botIsMember === true || ["creator", "administrator", "member"].includes(String(b[1].botStatus || "").toLowerCase());
+          if (aPresent !== bPresent) return Number(aPresent) - Number(bPresent);
+          return Number(a[1].lastSeenAt || 0) - Number(b[1].lastSeenAt || 0);
+        });
       for (const [oldId] of candidates.slice(0, Math.max(0, Object.keys(state.groups).length - maxRegisteredGroups))) {
         delete state.groups[oldId];
         delete state.groupUsage[oldId];
@@ -2687,6 +2707,8 @@ class ForwardSchedulerRuntime {
       id, title: asText(chat.title || old.title || id).slice(0, 180), username,
       link: username ? `https://t.me/${username}` : (old.link || null),
       type: "channel", botStatus: botMember?.status || old.botStatus || "Unknown",
+      botIsMember: botMember ? ["creator", "administrator", "member"].includes(String(botMember.status || "").toLowerCase())
+        : (typeof old.botIsMember === "boolean" ? old.botIsMember : null),
       permissions: botMember ? permissions : (old.permissions || permissions),
       rightsCheckedAt: botMember ? Date.now() : Number(old.rightsCheckedAt || 0),
       description: asText(chat.description || old.description || "").slice(0, 2_000),
@@ -2965,7 +2987,7 @@ class ForwardSchedulerRuntime {
       return;
     }
     if (state.blockedGroups.includes(targetId) || state.leftGroups.includes(targetId)
-      || ["left", "kicked"].includes(String(target.botStatus || "").toLowerCase())) {
+      || target.botIsMember === false || ["left", "kicked"].includes(String(target.botStatus || "").toLowerCase())) {
       await this.#send(ownerChatId, "ربات در این مقصد عضو نیست. وضعیت عضویت مقصد را تازه‌سازی کن.", state, {}, { bypassLocalRate: true });
       return;
     }
@@ -4104,7 +4126,7 @@ class ForwardSchedulerRuntime {
       const policy = state.targetPolicies?.[String(targetId)] || {};
       const quota = this.#targetQuotaSnapshot(state, targetId);
       const active = quota.active && !state.blockedGroups.includes(String(targetId)) && !state.leftGroups.includes(String(targetId))
-        && !["left", "kicked"].includes(String(record.botStatus || "").toLowerCase());
+        && record.botIsMember !== false && !["left", "kicked"].includes(String(record.botStatus || "").toLowerCase());
       const permissions = record.rights || record.permissions || {};
       const permissionLines = Object.entries(permissions).map(([key, value]) => `• ${escapeHtml(key)}: ${value === true ? "✅" : value === false ? "❌" : "نامشخص"}`).join("\n");
       const link = record.link || record.inviteLink || "";
@@ -4117,6 +4139,7 @@ class ForwardSchedulerRuntime {
         link: link ? `<a href="${escapeHtml(link)}">باز کردن مقصد</a>` : label("noLink", "در دسترس نیست"),
         username: record.username ? `@${escapeHtml(record.username)}` : "ندارد",
         botStatus: escapeHtml(record.botStatus || "نامشخص"),
+        botPresence: record.botIsMember === true ? "✅ ربات در مقصد عضو است" : record.botIsMember === false ? "❌ ربات عضو مقصد نیست" : "❔ وضعیت عضویت تأیید نشده",
         sendStatus: active ? `🟢 ${label("active", "فعال")}` : `🔴 ${label("inactive", "غیرفعال")}`,
         plan: escapeHtml(quota.tier),
         monthlyLimit: quotaLabel(quota.quota),
@@ -4177,7 +4200,7 @@ class ForwardSchedulerRuntime {
         const id = String(record.id);
         const quota = this.#targetQuotaSnapshot(state, id);
         const active = quota.active && !state.blockedGroups.includes(id) && !state.leftGroups.includes(id)
-          && !["left", "kicked"].includes(String(record.botStatus || "").toLowerCase());
+          && record.botIsMember !== false && !["left", "kicked"].includes(String(record.botStatus || "").toLowerCase());
         keyboard.push([button(`${active ? "🟢" : "🔴"} ${String(record.title || id).slice(0, 42)}`, `owneradmin:target:${id}`, active ? "success" : "danger")]);
       }
       const nav = [];
@@ -4216,7 +4239,12 @@ class ForwardSchedulerRuntime {
         return { ...item, count: Array.isArray(raw) ? raw.length : raw && typeof raw === "object" ? Object.keys(raw).length : 0 };
       });
       const records = [...Object.keys(state.groups || {}), ...(state.channels || []).map((item) => String(item.id))];
-      const active = records.filter((id) => this.#targetQuotaSnapshot(state, id).active && !state.blockedGroups.includes(id) && !state.leftGroups.includes(id)).length;
+      const active = records.filter((id) => {
+        const record = this.#targetRecord(state, id);
+        return Boolean(record && this.#targetQuotaSnapshot(state, id).active
+          && !state.blockedGroups.includes(id) && !state.leftGroups.includes(id)
+          && record.botIsMember !== false && !["left", "kicked"].includes(String(record.botStatus || "").toLowerCase()));
+      }).length;
       text = [
         `<b>${escapeHtml(config.title || "مدیریت مرکزی ربات")}</b>`,
         "━━━━━━━━━━━━━━",
@@ -4345,7 +4373,8 @@ class ForwardSchedulerRuntime {
       const targetRecord = targetId ? this.#targetRecord(state, targetId) : null;
       const quota = targetRecord ? this.#targetQuotaSnapshot(state, targetId) : null;
       const targetActive = Boolean(targetRecord && quota?.active && !state.blockedGroups.includes(targetId)
-        && !state.leftGroups.includes(targetId) && !["left", "kicked"].includes(String(targetRecord.botStatus || "").toLowerCase()));
+        && !state.leftGroups.includes(targetId) && targetRecord.botIsMember !== false
+        && !["left", "kicked"].includes(String(targetRecord.botStatus || "").toLowerCase()));
       const syntheticMessage = {
         from: callback.from,
         chat: callback.message.chat,
@@ -5133,6 +5162,62 @@ class ForwardSchedulerRuntime {
     console.log(JSON.stringify({ event: "durable_update_processed", updateId, updateType }));
   }
 
+  async #captureRegistryUpdate(state, update) {
+    if (this.#db(state)?.groupRegistration?.enabled === false) return false;
+    const chat = update?.my_chat_member?.chat
+      || update?.chat_member?.chat
+      || update?.chat_join_request?.chat
+      || update?.message?.chat || update?.edited_message?.chat
+      || update?.business_message?.chat || update?.edited_business_message?.chat
+      || update?.guest_message?.chat || update?.channel_post?.chat
+      || update?.edited_channel_post?.chat || update?.callback_query?.message?.chat;
+    if (!chat?.id) return false;
+
+    if (chat.type === "channel") {
+      await this.#trackChannel(state, chat, update?.my_chat_member?.new_chat_member || null);
+      return true;
+    }
+    if (!isGroup(chat)) return false;
+
+    const botMember = update?.my_chat_member?.new_chat_member || null;
+    const observedInChat = Boolean(update?.chat_member || update?.chat_join_request
+      || update?.message || update?.edited_message || update?.channel_post || update?.edited_channel_post || update?.callback_query);
+    await this.#trackGroup(state, chat, botMember, observedInChat);
+    const groupId = String(chat.id);
+    if (observedInChat && !state.blockedGroups.includes(groupId)) {
+      state.leftGroups = (state.leftGroups || []).filter((item) => String(item) !== groupId);
+      state.botJoinState[groupId] = { ...(state.botJoinState[groupId] || {}), active: true, status: "observed_in_chat", updatedAt: Date.now() };
+    }
+
+    if (update?.my_chat_member) {
+      const id = String(chat.id);
+      const status = String(botMember?.status || "unknown").toLowerCase();
+      const present = ["creator", "administrator", "member"].includes(status)
+        || (status === "restricted" && botMember?.is_member === true);
+      if (present && state.blockedGroups.includes(id)) {
+        const leave = await this.#telegram(state, "leaveChat", { chat_id: chat.id }, { bypassLocalRate: true });
+        if (leave.ok) {
+          if (state.groups[id]) {
+            state.groups[id].botStatus = "left";
+            state.groups[id].botIsMember = false;
+          }
+          state.botJoinState[id] = { ...(state.botJoinState[id] || {}), active: false, status: "owner_blocked", updatedAt: Date.now() };
+        } else {
+          state.botJoinState[id] = { ...(state.botJoinState[id] || {}), active: true, status: "owner_blocked_leave_failed", updatedAt: Date.now() };
+        }
+      } else if (present) {
+        state.leftGroups = (state.leftGroups || []).filter((item) => String(item) !== id);
+        state.botJoinState[id] = { ...(state.botJoinState[id] || {}), active: true, status: "membership_confirmed", updatedAt: Date.now() };
+      } else if (["left", "kicked"].includes(status)) {
+        state.botJoinState[id] = { ...(state.botJoinState[id] || {}), active: false, status, updatedAt: Date.now() };
+      } else {
+        state.botJoinState[id] = { ...(state.botJoinState[id] || {}), active: false, status: status || "unknown", updatedAt: Date.now() };
+      }
+    }
+    await this.#save(state);
+    return true;
+  }
+
   async #processUpdateInner(update) {
     const state = await this.#load();
     const updateId = update?.update_id;
@@ -5167,7 +5252,11 @@ class ForwardSchedulerRuntime {
       botEnabled: state.settings?.botEnabled !== false,
     }));
     if (state.settings?.botEnabled === false && !isOwnerSettingsMessage && !isOwnerSettingsCallback && !isOwnerPanelMessage && !isOwnerPanelCallback && !isOwnerComposerMessage) {
-      console.log(JSON.stringify({ event: "telegram_update_ignored_bot_disabled", updateId }));
+      if (this.#db(state)?.groupRegistration?.captureWhenBotPaused !== false) {
+        const captured = await this.#captureRegistryUpdate(state, update);
+        if (captured) await this.#save(state);
+      }
+      console.log(JSON.stringify({ event: "telegram_update_ignored_bot_disabled", updateId, registryCaptured: true }));
       return;
     }
     await this.#save(state);
@@ -5200,65 +5289,77 @@ class ForwardSchedulerRuntime {
       if (!isGroup(chat)) return;
       this.telegramCache.clear();
       await this.#trackGroup(state, chat, member);
-      const nextStatus = member.status;
+      const groupId = String(chat.id);
+      const nextStatus = String(member.status || "unknown").toLowerCase();
+      const botIsPresent = ["creator", "administrator", "member"].includes(nextStatus)
+        || (nextStatus === "restricted" && member.is_member === true);
       if (["left", "kicked"].includes(nextStatus)) {
-        state.botJoinState[String(chat.id)] = { ...(state.botJoinState[String(chat.id)] || {}), active: false, status: nextStatus, updatedAt: Date.now() };
-        if (state.groupSettings[String(chat.id)]) {
-          state.groupSettings[String(chat.id)].chatterEnabled = false;
-          state.groupSettings[String(chat.id)].chatterNextAt = 0;
+        state.botJoinState[groupId] = { ...(state.botJoinState[groupId] || {}), active: false, status: nextStatus, updatedAt: Date.now() };
+        if (state.groups[groupId]) state.groups[groupId].botStatus = nextStatus;
+        if (state.groupSettings[groupId]) {
+          state.groupSettings[groupId].chatterEnabled = false;
+          state.groupSettings[groupId].chatterNextAt = 0;
         }
         await this.#save(state);
-      } else if (["member", "administrator"].includes(nextStatus)) {
-        const groupId = String(chat.id);
-        // A group previously rejected only for being below the minimum size may
-        // retry after growing and re-adding the bot. Explicit owner blocks remain.
-        if (state.botJoinState[groupId]?.status === "left_minimum_members") {
-          state.leftGroups = state.leftGroups.filter((id) => id !== groupId);
-          state.botJoinState[groupId].active = false;
-        }
-        if (state.blockedGroups.includes(groupId) || state.leftGroups.includes(groupId)) {
-          await this.#telegram(state, "leaveChat", { chat_id: chat.id }, { bypassLocalRate: true });
+      } else if (botIsPresent) {
+        // A fresh my_chat_member event is authoritative. Clear stale legacy
+        // left markers unless the owner explicitly blocked this chat.
+        if (!state.blockedGroups.includes(groupId)) state.leftGroups = (state.leftGroups || []).filter((id) => String(id) !== groupId);
+        if (state.blockedGroups.includes(groupId)) {
+          const leave = await this.#telegram(state, "leaveChat", { chat_id: chat.id }, { bypassLocalRate: true });
+          if (leave.ok) {
+            if (state.groups[groupId]) {
+              state.groups[groupId].botStatus = "left";
+              state.groups[groupId].botIsMember = false;
+            }
+            state.botJoinState[groupId].active = false;
+            state.botJoinState[groupId].status = "owner_blocked";
+          }
         } else {
           const join = state.botJoinState[groupId] || {};
-          if (!join.active) {
-            state.botJoinState[groupId] = { active: true, startedAt: Date.now(), status: "checking" };
-            const countResult = await this.#telegram(state, "getChatMemberCount", { chat_id: chat.id }, { bypassLocalRate: true });
-            if (!countResult?.ok || !Number.isInteger(countResult.result) || countResult.result < 0) {
-              state.botJoinState[groupId].status = "count_unavailable";
-              state.botJoinState[groupId].active = false;
-              state.botJoinState[groupId].countCheckedAt = Date.now();
-              await this.#save(state);
-              // Joining a group must remain silent; no greeting or owner notification is sent.
-            } else {
+          if (!join.active || ["left", "kicked", "left_minimum_members", "rejected_too_small"].includes(String(join.status || ""))) {
+            state.botJoinState[groupId] = { ...join, active: true, startedAt: Date.now(), status: "checking" };
+            const countResult = await this.#telegram(state, "getChatMemberCount", { chat_id: chat.id }, { bypassLocalRate: true, noCache: true });
+            if (countResult?.ok && Number.isInteger(countResult.result) && countResult.result >= 0) {
               state.groups[groupId].lastMemberCount = countResult.result;
               state.groups[groupId].lastMemberCountAt = Date.now();
               state.botJoinState[groupId].memberCount = countResult.result;
               state.botJoinState[groupId].countCheckedAt = Date.now();
-              if (countResult.result < 25) {
-                state.botJoinState[groupId].status = "rejected_too_small";
-                await this.#save(state);
-                  const left = await this.#telegram(state, "leaveChat", { chat_id: chat.id }, { bypassLocalRate: true });
-                if (left.ok) {
-                  state.groups[groupId].botStatus = "left";
-                  state.leftGroups = [...new Set([...state.leftGroups, groupId])].slice(-2_000);
-                  state.botJoinState[groupId].status = "left_minimum_members";
-                } else {
-                  state.botJoinState[groupId].active = false;
-                  state.botJoinState[groupId].status = "leave_failed_minimum_members";
-                }
+            }
+            const registration = this.#db(state)?.groupRegistration || {};
+            const minimumMembers = clampNumber(registration.minimumMembers, 0, 0, 100_000);
+            const belowMinimum = minimumMembers > 0 && countResult?.ok
+              && Number.isInteger(countResult.result) && countResult.result < minimumMembers;
+            if (belowMinimum && registration.autoLeaveBelowMinimum === true) {
+              state.botJoinState[groupId].status = "below_configured_minimum";
+              await this.#save(state);
+              const left = await this.#telegram(state, "leaveChat", { chat_id: chat.id }, { bypassLocalRate: true });
+              if (left.ok) {
+                state.groups[groupId].botStatus = "left";
+                state.groups[groupId].botIsMember = false;
+                state.leftGroups = [...new Set([...state.leftGroups, groupId])].slice(-5_000);
+                state.botJoinState[groupId].active = false;
+                state.botJoinState[groupId].status = "left_configured_minimum";
               } else {
-                state.botJoinState[groupId].status = "ready";
-                await this.#save(state);
+                state.botJoinState[groupId].status = "minimum_leave_failed";
               }
+            } else {
+              state.botJoinState[groupId].active = true;
+              state.botJoinState[groupId].status = countResult?.ok ? "ready" : "ready_count_unavailable";
             }
           }
         }
+        await this.#save(state);
+      } else {
+        state.botJoinState[groupId] = { ...(state.botJoinState[groupId] || {}), active: false, status: nextStatus, updatedAt: Date.now() };
+        await this.#save(state);
       }
     } else if (update?.chat_member) {
       const memberUpdate = update.chat_member;
       const chat = memberUpdate.chat || {};
       if (!isGroup(chat)) return;
-      await this.#trackGroup(state, chat);
+      await this.#trackGroup(state, chat, null, true);
+      if (!state.blockedGroups.includes(String(chat.id))) state.leftGroups = (state.leftGroups || []).filter((id) => String(id) !== String(chat.id));
       const memberUser = memberUpdate.new_chat_member?.user;
       this.#rememberKnownMember(state, chat, memberUser);
       const oldStatus = memberUpdate.old_chat_member?.status;
@@ -5323,7 +5424,8 @@ class ForwardSchedulerRuntime {
     } else if (update?.chat_join_request) {
       const joinRequest = update.chat_join_request;
       if (!isGroup(joinRequest.chat)) return;
-      await this.#trackGroup(state, joinRequest.chat);
+      await this.#trackGroup(state, joinRequest.chat, null, true);
+      if (!state.blockedGroups.includes(String(joinRequest.chat.id))) state.leftGroups = (state.leftGroups || []).filter((id) => String(id) !== String(joinRequest.chat.id));
       await this.#handleJoinRequest(state, joinRequest);
     } else {
       // Channel posts are registry events only; group moderation/reply handlers
@@ -5334,10 +5436,18 @@ class ForwardSchedulerRuntime {
         const chat = message.chat || {};
         if (isGroup(chat)) {
           const groupId = String(chat.id);
-          if (state.blockedGroups.includes(groupId) || state.leftGroups.includes(groupId)) {
-            await this.#telegram(state, "leaveChat", { chat_id: chat.id }, { bypassLocalRate: true });
+          // A message delivered from a chat proves the bot is currently present.
+          // Legacy left markers must not cause an immediate leave on re-add.
+          if (!state.blockedGroups.includes(groupId)) state.leftGroups = (state.leftGroups || []).filter((id) => String(id) !== groupId);
+          if (state.blockedGroups.includes(groupId)) {
+            await this.#trackGroup(state, chat, null, true);
+            const leave = await this.#telegram(state, "leaveChat", { chat_id: chat.id }, { bypassLocalRate: true });
+            if (leave.ok && state.groups[groupId]) {
+            state.groups[groupId].botStatus = "left";
+            state.groups[groupId].botIsMember = false;
+          }
           } else {
-            await this.#trackGroup(state, chat);
+            await this.#trackGroup(state, chat, null, true);
             if (!state.groupSettings[groupId]) {
               state.groupSettings[groupId] = {
                 botEnabled: true, chatterEnabled: false, chatterNextAt: 0,
@@ -5568,7 +5678,7 @@ class ForwardSchedulerRuntime {
     const policy = state.targetPolicies?.[String(chatId)] || {};
     const usage = this.#targetUsageSnapshot(state, chatId);
     if (state.blockedGroups.includes(String(chatId)) || state.leftGroups.includes(String(chatId))
-      || ["left", "kicked"].includes(String(record.botStatus || "").toLowerCase())) {
+      || record.botIsMember === false || ["left", "kicked"].includes(String(record.botStatus || "").toLowerCase())) {
       return { allowed: false, reason: "bot_not_member" };
     }
     const tier = String(policy.tier || config.defaultTier || "FREE").toUpperCase();
