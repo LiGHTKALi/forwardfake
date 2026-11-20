@@ -1,17 +1,17 @@
 {
   "schemaVersion": 5,
-  "version": "5.4.10-cloudflare-native",
+  "version": "5.4.13-config-driven-runtime",
   "name": "MUNITOS Group Management Database",
   "language": "fa",
-  "description": "مدیریت گروه و کانال، پیام همگانی مالک، سهمیه ماهانه پلن‌ها، خوش‌آمدگویی مجدد و پیام خداحافظی. Compatible with standard Cloudflare Workers; no Dynamic Workers binding.",
+  "description": "پیکربندی متمرکز فرمان‌ها و سطح دسترسی، پنل مالک، سهمیه مقصدها و موتور فرمان‌های مبتنی بر Action DSL.",
   "runtime": {
     "telegram": {
       "parseMode": "HTML"
     },
     "javascript": {
-      "enabled": false,
-      "mode": "object-literal-data",
-      "execution": "disabled",
+      "enabled": true,
+      "mode": "javascript-object-literal-config",
+      "execution": "action-dsl-only",
       "supportedSyntax": [
         "line-comments",
         "block-comments",
@@ -23,7 +23,7 @@
         "export-default-object",
         "module-exports-object"
       ],
-      "note": "This setting controls data syntax only. Arbitrary JavaScript execution is not available in a standard Cloudflare Worker without bundling a separate JavaScript interpreter."
+      "note": "JavaScript object-literal syntax is accepted inside database.json. Executable expressions are not evaluated; runtime behavior is configured through the declarative Action DSL and the shared Telegram API gateway."
     },
     "capabilities": [
       "group.moderation.silence",
@@ -49,6 +49,25 @@
       "sweepIntervalMinutes": 60,
       "sweepBatchSize": 48,
       "maxDeletesPerRun": 96
+    },
+    "commandEngine": {
+      "enabled": true,
+      "mode": "declarative-actions",
+      "maxActionsPerCommand": 12,
+      "templateSyntax": "{{user.id}} {{chat.id}} {{argsText}} {{message.text}} {{reply.text}} {{result.value}}",
+      "supportedActions": [
+        "reply",
+        "send_message",
+        "telegram",
+        "toggle_feature",
+        "set_group_setting",
+        "delete_group_setting",
+        "resource_set",
+        "resource_get",
+        "target_policy_set",
+        "owner_panel_show"
+      ],
+      "note": "فرمان‌های جدیدی که از handlerهای داخلی موجود یا Action DSL استفاده کنند، فقط با database.json قابل تعریف‌اند. اجرای JavaScript آزاد یا eval فعال نیست."
     }
   },
   "limits": {
@@ -83,7 +102,9 @@
         "label": "SUPER"
       }
     },
-    "broadcastIntervalMs": 3500
+    "broadcastIntervalMs": 3500,
+    "maxRegisteredGroups": 1000,
+    "maxRegisteredChannels": 500
   },
   "roles": {
     "adminIds": [],
@@ -242,14 +263,14 @@
     "language": "fa",
     "title": "📚 راهنمای کامل مدیریت گروه",
     "parseMode": "HTML",
-    "intro": "برای مشاهده توضیحات هر بخش، دکمه رنگی مربوط را انتخاب کنید. همه فرمان‌ها از دیتابیس خوانده می‌شوند و با تعویض دیتابیس، راهنما نیز تغییر می‌کند.\n\nمدیریت گروه و کانال‌ها، ارسال پیام همگانی و تعیین سهمیه ماهانه فقط از پنل خصوصی مالک انجام می‌شود.",
+    "intro": "برای مشاهده توضیحات هر بخش، دکمه رنگی مربوط را انتخاب کنید. همه فرمان‌ها از دیتابیس خوانده می‌شوند و با تعویض دیتابیس، راهنما نیز تغییر می‌کند.\n\nمدیریت گروه و کانال‌ها، ارسال پیام همگانی و تعیین سهمیه ماهانه فقط از پنل خصوصی مالک انجام می‌شود.\n\n🔐 فرمان‌های بن، رفع بن، سکوت، رفع سکوت، خوش‌آمدگویی و خداحافظی فقط برای مالک گروه یا مدیران واقعی گروه مجاز هستند؛ وضعیت مدیر از Telegram بررسی می‌شود.",
     "sections": [
       {
         "id": "silent",
         "title": "🔇 سکوت",
         "buttonLabel": "🔇 سکوت و محدودیت",
         "color": "danger",
-        "description": "با این فرمان‌ها کاربر در همین گروه محدود یا آزاد می‌شود. چهار فرمان فارسی و انگلیسی پشتیبانی می‌شوند. هدف با ریپلای، text mention، یوزرنیم شناخته‌شده یا آیدی عددی مشخص می‌شود.",
+        "description": "با این فرمان‌ها کاربر در همین گروه محدود یا آزاد می‌شود. چهار فرمان فارسی و انگلیسی پشتیبانی می‌شوند. هدف با ریپلای، text mention، یوزرنیم شناخته‌شده یا آیدی عددی مشخص می‌شود.\n\n🔐 اجرای همه فرمان‌های این بخش فقط برای مالک گروه یا مدیران واقعی گروه مجاز است؛ وضعیت مدیر از Telegram بررسی می‌شود.",
         "commands": [
           "silent",
           "unsilent",
@@ -262,7 +283,7 @@
         "title": "⛔ بن",
         "buttonLabel": "⛔ بن و آزادسازی",
         "color": "danger",
-        "description": "بن در گروه و فهرست پایدار همان گروه ثبت می‌شود. اگر کاربر با وجود آزادسازی دستی دوباره وارد شود، ربات دوباره او را مسدود می‌کند. آزادسازی نهایی با UnBan یا حذف بن انجام می‌شود.",
+        "description": "بن در گروه و فهرست پایدار همان گروه ثبت می‌شود. اگر کاربر با وجود آزادسازی دستی دوباره وارد شود، ربات دوباره او را مسدود می‌کند. آزادسازی نهایی با UnBan یا حذف بن انجام می‌شود.\n\n🔐 اجرای همه فرمان‌های این بخش فقط برای مالک گروه یا مدیران واقعی گروه مجاز است؛ وضعیت مدیر از Telegram بررسی می‌شود.",
         "commands": [
           "ban",
           "unban",
@@ -275,7 +296,7 @@
         "title": "👋 خوش‌آمدگویی",
         "buttonLabel": "👋 خوش‌آمدگویی",
         "color": "success",
-        "description": "خوش‌آمد قابل تنظیم، زمان‌بندی‌شده و همراه رسانه است. برای تمام ورودها پیام ارسال می‌شود؛ چه کاربر با لینک دعوت وارد شود، چه توسط مدیر اضافه شود و چه پس از خروج دوباره برگردد. پس از خروج، وضعیت ارسال قبلی پاک می‌شود تا ورود بعدی نیز پیام تازه دریافت کند. برای دریافت مطمئن رویدادهای عضویت، ربات باید مدیر گروه باشد.\n\nمتغیرها:\n!mention / منشن_کاربر\n!firstname / نام_کاربر\n!lastname / فامیل_کاربر\n!username / آیدی_کاربر\n!userid / آیدی_عددی_کاربر\n!grouplink / لینک_گروه\n!grouprules / قوانین_گروه\n!groupname / نام_گروه\n!date / زمان_تاریخ\n!time / زمان_ساعت\n!emoji / ایموجی_خودکار\n\nدر راهنمای گروه، روشن/خاموش‌کردن خوش‌آمدگویی به‌صورت یک دکمه وضعیت‌دار انجام می‌شود.",
+        "description": "خوش‌آمد قابل تنظیم، زمان‌بندی‌شده و همراه رسانه است. برای تمام ورودها پیام ارسال می‌شود؛ چه کاربر با لینک دعوت وارد شود، چه توسط مدیر اضافه شود و چه پس از خروج دوباره برگردد. پس از خروج، وضعیت ارسال قبلی پاک می‌شود تا ورود بعدی نیز پیام تازه دریافت کند. برای دریافت مطمئن رویدادهای عضویت، ربات باید مدیر گروه باشد.\n\nمتغیرها:\n!mention / منشن_کاربر\n!firstname / نام_کاربر\n!lastname / فامیل_کاربر\n!username / آیدی_کاربر\n!userid / آیدی_عددی_کاربر\n!grouplink / لینک_گروه\n!grouprules / قوانین_گروه\n!groupname / نام_گروه\n!date / زمان_تاریخ\n!time / زمان_ساعت\n!emoji / ایموجی_خودکار\n\nدر راهنمای گروه، روشن/خاموش‌کردن خوش‌آمدگویی به‌صورت یک دکمه وضعیت‌دار انجام می‌شود.\n\n🔐 اجرای همه فرمان‌های این بخش فقط برای مالک گروه یا مدیران واقعی گروه مجاز است؛ وضعیت مدیر از Telegram بررسی می‌شود.",
         "commands": [
           "welcome_on",
           "welcome_off",
@@ -291,7 +312,7 @@
         "title": "👋 خداحافظی",
         "buttonLabel": "👋 پیام خداحافظی",
         "color": "danger",
-        "description": "با خروج یا حذف عضو از گروه، پیام خداحافظی ارسال می‌شود. متن و رسانه برای هر گروه جداگانه قابل تنظیم است و قالب‌بندی HTML مانند Bold حفظ می‌شود. متغیرها: !mention، !firstname، !lastname، !username، !userid، !groupname، !date و !time.\n\nدر راهنمای گروه، روشن/خاموش‌کردن خداحافظی به‌صورت یک دکمه وضعیت‌دار انجام می‌شود.",
+        "description": "با خروج یا حذف عضو از گروه، پیام خداحافظی ارسال می‌شود. متن و رسانه برای هر گروه جداگانه قابل تنظیم است و قالب‌بندی HTML مانند Bold حفظ می‌شود. متغیرها: !mention، !firstname، !lastname، !username، !userid، !groupname، !date و !time.\n\nدر راهنمای گروه، روشن/خاموش‌کردن خداحافظی به‌صورت یک دکمه وضعیت‌دار انجام می‌شود.\n\n🔐 اجرای همه فرمان‌های این بخش فقط برای مالک گروه یا مدیران واقعی گروه مجاز است؛ وضعیت مدیر از Telegram بررسی می‌شود.",
         "commands": [
           "goodbye_on",
           "goodbye_off",
@@ -343,7 +364,11 @@
       "usage": "سکوت [ریپلای / @username / منشن / آیدی عددی]",
       "color": "danger",
       "enabled": true,
-      "notes": "ربات باید مدیر گروه با دسترسی Restrict Members باشد. برای یوزرنیم، ربات باید قبلاً کاربر را در همان گروه دیده باشد."
+      "notes": "ربات باید مدیر گروه با دسترسی Restrict Members باشد. برای یوزرنیم، ربات باید قبلاً کاربر را در همان گروه دیده باشد.",
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "unsilent",
@@ -364,7 +389,11 @@
       "description": "محدودیت ارسال پیام کاربر را برمی‌دارد.",
       "usage": "حذف سکوت [کاربر]",
       "color": "success",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "silent_list",
@@ -384,7 +413,11 @@
       "description": "فهرست کاربران سکوت‌شده در همین گروه را نمایش می‌دهد.",
       "usage": "لیست سکوت",
       "color": "primary",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "clean_silent_list",
@@ -406,7 +439,11 @@
       "description": "سعی می‌کند سکوت همه کاربران فهرست را بردارد و فقط موارد ناموفق را نگه می‌دارد.",
       "usage": "پاکسازی لیست سکوت",
       "color": "danger",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "ban",
@@ -427,7 +464,11 @@
       "usage": "بن [ریپلای / @username / منشن / آیدی عددی]",
       "color": "danger",
       "enabled": true,
-      "notes": "برای بن‌کردن کاربر خارج از گروه، آیدی عددی یا کاربر شناخته‌شده لازم است. ربات باید دسترسی Restrict Members داشته باشد."
+      "notes": "برای بن‌کردن کاربر خارج از گروه، آیدی عددی یا کاربر شناخته‌شده لازم است. ربات باید دسترسی Restrict Members داشته باشد.",
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "unban",
@@ -448,7 +489,11 @@
       "description": "کاربر را از بلاک‌لیست تلگرام و فهرست بن پایدار ربات آزاد می‌کند.",
       "usage": "حذف بن [کاربر]",
       "color": "success",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "ban_list",
@@ -468,7 +513,11 @@
       "description": "فهرست کاربران بن‌شده در همین گروه را نمایش می‌دهد.",
       "usage": "لیست بن",
       "color": "primary",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "clean_ban_list",
@@ -490,7 +539,11 @@
       "description": "تلاش می‌کند همه کاربران فهرست را Unban کند و موارد ناموفق را نگه می‌دارد.",
       "usage": "پاکسازی لیست بن",
       "color": "danger",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "welcome_on",
@@ -514,7 +567,11 @@
       "color": "success",
       "enabled": true,
       "toggleFeature": "welcome",
-      "toggleLabel": "👋 خوش‌آمدگویی"
+      "toggleLabel": "👋 خوش‌آمدگویی",
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "welcome_off",
@@ -538,7 +595,11 @@
       "color": "danger",
       "enabled": true,
       "toggleFeature": "welcome",
-      "toggleLabel": "👋 خوش‌آمدگویی"
+      "toggleLabel": "👋 خوش‌آمدگویی",
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "set_welcome",
@@ -559,7 +620,11 @@
       "description": "متن خوش‌آمد را برای همین گروه تنظیم می‌کند. متن را بعد از دستور بنویسید یا روی یک پیام متنی ریپلای کنید.",
       "usage": "تنظیم خوشامد سلام !mention به گروه !groupname خوش آمدی",
       "color": "primary",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "get_welcome",
@@ -580,7 +645,11 @@
       "description": "متن، رسانه و زمان تأخیر فعلی خوش‌آمدگویی را نشان می‌دهد.",
       "usage": "دریافت خوشامد",
       "color": "primary",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "reset_welcome",
@@ -602,7 +671,11 @@
       "description": "متن و رسانه و تأخیر اختصاصی گروه را حذف می‌کند و به مقدار پیش‌فرض دیتابیس بازمی‌گرداند.",
       "usage": "ریست خوشامد",
       "color": "danger",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "set_welcome_time",
@@ -623,7 +696,11 @@
       "description": "تأخیر ارسال خوش‌آمد را بر حسب ثانیه بین ۰ تا ۳۶۰۰ تنظیم می‌کند.",
       "usage": "تنظیم زمان خوشامد 30",
       "color": "primary",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "set_welcome_media",
@@ -644,7 +721,11 @@
       "description": "روی عکس، ویدئو، آهنگ، ویس، گیف، استیکر یا ویدئوی سلفی ریپلای کنید و این دستور را بفرستید؛ یا دستور را به‌عنوان کپشن همان رسانه ارسال کنید. متن خوش‌آمد به‌عنوان کپشن استفاده می‌شود.",
       "usage": "تنظیم رسانه خوشامد",
       "color": "primary",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "info",
@@ -666,7 +747,11 @@
       "usage": "اطلاعات [ریپلای / @username / منشن / آیدی عددی]",
       "color": "primary",
       "enabled": true,
-      "notes": "برای دریافت اطلاعات، روی پیام کاربر ریپلای کنید یا منشن مستقیم، یوزرنیم شناخته‌شده یا آیدی عددی را بدهید. اطلاعات خصوصی فقط در صورت ارائه‌شدن توسط Telegram نمایش داده می‌شوند."
+      "notes": "برای دریافت اطلاعات، روی پیام کاربر ریپلای کنید یا منشن مستقیم، یوزرنیم شناخته‌شده یا آیدی عددی را بدهید. اطلاعات خصوصی فقط در صورت ارائه‌شدن توسط Telegram نمایش داده می‌شوند.",
+      "access": {
+        "policy": "memberCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "help",
@@ -687,7 +772,11 @@
       "description": "راهنمای تعاملی و داینامیک همه فرمان‌های فعال دیتابیس را با دکمه‌های رنگی نمایش می‌دهد.",
       "usage": "/help یا Help یا راهنما",
       "color": "success",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "memberCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "goodbye_on",
@@ -710,7 +799,11 @@
       "color": "success",
       "enabled": true,
       "toggleFeature": "goodbye",
-      "toggleLabel": "👋 پیام خداحافظی"
+      "toggleLabel": "👋 پیام خداحافظی",
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "goodbye_off",
@@ -733,7 +826,11 @@
       "color": "danger",
       "enabled": true,
       "toggleFeature": "goodbye",
-      "toggleLabel": "👋 پیام خداحافظی"
+      "toggleLabel": "👋 پیام خداحافظی",
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "set_goodbye",
@@ -753,7 +850,11 @@
       "description": "Set the goodbye text; HTML formatting is supported.",
       "usage": "تنظیم خداحافظی متن پیام",
       "color": "primary",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "get_goodbye",
@@ -773,7 +874,11 @@
       "description": "Shows the current goodbye text and media.",
       "usage": "دریافت خداحافظی",
       "color": "primary",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "reset_goodbye",
@@ -793,7 +898,11 @@
       "description": "Resets the group goodbye settings to database defaults.",
       "usage": "ریست خداحافظی",
       "color": "danger",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
     },
     {
       "id": "set_goodbye_media",
@@ -813,7 +922,39 @@
       "description": "Sets a photo, video, audio, voice, animation, sticker or video note as goodbye media.",
       "usage": "تنظیم رسانه خداحافظی (با ریپلای)",
       "color": "primary",
-      "enabled": true
+      "enabled": true,
+      "access": {
+        "policy": "groupAdminCommands",
+        "scope": "group_or_supergroup"
+      }
+    },
+    {
+      "id": "example_configured_reply",
+      "title": "نمونه فرمان قابل تعریف در دیتابیس",
+      "buttonLabel": "نمونه فرمان",
+      "labelFa": "نمونه فرمان",
+      "aliases": [
+        "نمونه فرمان"
+      ],
+      "slashCommands": [
+        "example_reply"
+      ],
+      "section": "general",
+      "descriptionFa": "نمونه‌ای از فرمان قابل تعریف فقط با JSON و Action DSL.",
+      "description": "Example database-driven command.",
+      "usage": "نمونه فرمان",
+      "color": "primary",
+      "enabled": false,
+      "access": {
+        "policy": "memberCommands",
+        "scope": "group_or_supergroup"
+      },
+      "actions": [
+        {
+          "type": "reply",
+          "text": "سلام {{user.first_name}}؛ این فرمان فقط از دیتابیس تعریف شده است."
+        }
+      ]
     }
   ],
   "ownerBroadcast": {
@@ -835,6 +976,300 @@
     "defaultActive": true,
     "access": "owner_settings_only",
     "messageMode": "copy_original",
-    "note": "ارسال همگانی فقط از پنل خصوصی /settings مالک انجام می‌شود. همه گروه‌ها و کانال‌های جدید به‌صورت پیش‌فرض FREE با سقف ۱۰۰۰ پیام همگانی در ماه هستند. تغییر پلن و سقف هر مقصد از جزئیات همان گروه/کانال در Settings انجام می‌شود. خرید و پرداخت خودکار اشتراک در این نسخه پیاده‌سازی نشده و ارتقای پلن فعلاً باید توسط مالک انجام شود."
+    "note": "مدیریت مقصدها، پلن و سهمیه با پنل خصوصی /admin انجام می‌شود. مصرف ماهانه فقط پس از ارسال موفق پیام همگانی شمارش می‌شود.",
+    "targetPolicy": {
+      "managedTargetTypes": [
+        "group",
+        "supergroup",
+        "channel"
+      ],
+      "defaultTier": "FREE",
+      "defaultActive": true,
+      "quotaPeriod": "calendar_month_utc",
+      "usageMetric": "successfully_delivered_broadcast_messages",
+      "perTargetOverride": true,
+      "ownerOnlyManagement": true,
+      "enforcedByWorker": true
+    }
+  },
+  "authorization": {
+    "defaultGroupCommand": "group_member",
+    "verification": {
+      "provider": "telegram_bot_api",
+      "method": "getChatMember",
+      "acceptedAdministratorStatuses": [
+        "creator",
+        "administrator"
+      ],
+      "databaseRoleListsAreNotProof": true
+    },
+    "groupAdminCommands": {
+      "handlerPrefixes": [
+        "moderation.",
+        "welcome.",
+        "goodbye."
+      ],
+      "scope": "group_or_supergroup",
+      "requiredRole": "creator_or_administrator",
+      "verification": "telegram_live_membership",
+      "botOwnerBypass": false,
+      "denialText": "group.adminOnly"
+    },
+    "memberCommands": {
+      "handlers": [
+        "help",
+        "profile.info"
+      ],
+      "scope": "group_or_supergroup",
+      "requiredRole": "member"
+    },
+    "privateOwnerCommands": {
+      "scope": "private",
+      "requiredUserId": "8621035125",
+      "unauthorizedBehavior": "ignore_without_reply"
+    }
+  },
+  "ownerPanel": {
+    "enabled": true,
+    "command": "admin",
+    "slashCommand": "/admin",
+    "ownerId": "8621035125",
+    "access": {
+      "chatType": "private",
+      "userIds": [
+        "8621035125"
+      ],
+      "unauthorizedBehavior": "ignore_without_reply"
+    },
+    "implementation": {
+      "status": "implemented",
+      "route": "private_owner_command",
+      "callbacks": "owneradmin:*",
+      "note": "فهرست گروه‌ها و کانال‌ها، جزئیات، سطح دسترسی ربات، وضعیت ارسال، پلن و سهمیه ماهانه با Worker عمومی اجرا می‌شود."
+    },
+    "title": "مدیریت مرکزی ربات",
+    "intro": "فهرست تمام گروه‌ها و کانال‌های ثبت‌شده و مدیریت دسترسی ارسال همگانی.",
+    "sections": [
+      {
+        "id": "groups",
+        "title": "گروه‌ها",
+        "registrySource": "state.groups",
+        "usageSource": "state.groupUsage",
+        "fields": [
+          "title",
+          "id",
+          "username",
+          "link",
+          "type",
+          "botStatus",
+          "rights",
+          "lastMemberCount",
+          "lastMemberCountAt",
+          "lastSeenAt",
+          "inviteLink",
+          "botJoinState",
+          "isBlocked",
+          "isLeft"
+        ],
+        "usage": {
+          "field": "groupUsage",
+          "label": "تعداد پیام‌های ثبت‌شده",
+          "period": "cumulative",
+          "note": "این شمارنده در Worker فعلی شمارنده ماهانه ارسال همگانی نیست."
+        },
+        "detailActions": [
+          "toggle_send",
+          "set_plan",
+          "set_quota"
+        ]
+      },
+      {
+        "id": "channels",
+        "title": "کانال‌ها",
+        "registrySource": "state.channels",
+        "fields": [
+          "title",
+          "id",
+          "username",
+          "link",
+          "type",
+          "botStatus",
+          "permissions",
+          "rightsCheckedAt",
+          "lastSeenAt"
+        ],
+        "usage": {
+          "available": false,
+          "note": "Worker فعلی شمارنده مصرف ماهانه جداگانه برای کانال‌ها نگه نمی‌دارد."
+        },
+        "detailActions": [
+          "toggle_send",
+          "set_plan",
+          "set_quota"
+        ]
+      }
+    ],
+    "listDisplay": {
+      "showNumericChatId": true,
+      "showTelegramLink": true,
+      "showChatType": true,
+      "showBotRole": true,
+      "showBotPermissions": true,
+      "showPlanAndMonthlyLimit": true,
+      "showMonthlyUsedAndRemaining": true
+    },
+    "callbacks": {
+      "prefix": "owneradmin:",
+      "home": "owneradmin:home",
+      "groups": "owneradmin:list:groups:0",
+      "channels": "owneradmin:list:channels:0",
+      "details": "owneradmin:target",
+      "refresh": "owneradmin:home",
+      "activate": "owneradmin:activate",
+      "deactivate": "owneradmin:deactivate",
+      "setPlan": "owneradmin:setplan",
+      "quota": "owneradmin:quota",
+      "dynamicAction": "owneradmin:action:<action_id>:<target_id>",
+      "homeAction": "owneradmin:action:<action_id>"
+    },
+    "commandDescription": "پنل مدیریت مالک ربات",
+    "pageSize": 8,
+    "quotaPresets": [
+      0,
+      500,
+      1000,
+      2000,
+      5000,
+      10000,
+      -1
+    ],
+    "detailsFields": [
+      "title",
+      "type",
+      "id",
+      "link",
+      "username",
+      "botStatus",
+      "sendStatus",
+      "plan",
+      "monthlyLimit",
+      "monthlyUsed",
+      "remaining",
+      "period",
+      "rights",
+      "lastMemberCount",
+      "lastSeenAt",
+      "inviteLink"
+    ],
+    "labels": {
+      "groups": "گروه‌ها",
+      "channels": "کانال‌ها",
+      "targetType": "نوع مقصد",
+      "numericId": "شناسه عددی",
+      "link": "لینک",
+      "username": "یوزرنیم",
+      "botStatus": "وضعیت عضویت ربات",
+      "sendStatus": "وضعیت ارسال همگانی",
+      "plan": "پلن مقصد",
+      "monthlyLimit": "سقف ماهانه",
+      "monthlyUsed": "مصرف ماه جاری",
+      "remaining": "مانده سهمیه",
+      "period": "دوره محاسبه",
+      "permissions": "دسترسی‌های ربات",
+      "active": "فعال",
+      "inactive": "غیرفعال",
+      "home": "مدیریت مرکزی ربات",
+      "noLink": "در دسترس نیست (خصوصی یا لینک ثبت نشده)",
+      "title": "نام مقصد",
+      "type": "نوع مقصد",
+      "id": "شناسه عددی",
+      "rights": "دسترسی‌های ربات",
+      "lastMemberCount": "تعداد اعضا",
+      "lastSeenAt": "آخرین بروزرسانی",
+      "inviteLink": "لینک دعوت",
+      "unlimited": "نامحدود"
+    },
+    "text": {
+      "planTitle": "انتخاب پلن",
+      "quotaTitle": "تنظیم سقف ماهانه",
+      "quotaPrompt": "سقف اختصاصی برای این مقصد را انتخاب کن:",
+      "notFound": "مقصد پیدا نشد.",
+      "saved": "تنظیمات مقصد ذخیره شد."
+    },
+    "views": [
+      {
+        "id": "groups",
+        "title": "👥 گروه‌ها",
+        "sourcePath": "state.groups",
+        "itemType": "group"
+      },
+      {
+        "id": "channels",
+        "title": "📣 کانال‌ها",
+        "sourcePath": "state.channels",
+        "itemType": "channel"
+      }
+    ],
+    "detailActions": [
+      {
+        "id": "toggle_send",
+        "label": "وضعیت ارسال همگانی",
+        "labelWhenActive": "🔴 غیرفعال‌کردن ارسال همگانی",
+        "labelWhenInactive": "🟢 فعال‌کردن ارسال همگانی",
+        "colorWhenActive": "danger",
+        "colorWhenInactive": "success",
+        "actions": [
+          {
+            "type": "target_policy_set",
+            "targetId": "{{callback.args.0}}",
+            "key": "active",
+            "value": "{{target.nextActive}}"
+          },
+          {
+            "type": "owner_panel_show",
+            "view": "target",
+            "targetId": "{{callback.args.0}}",
+            "note": "وضعیت ارسال مقصد ذخیره شد."
+          }
+        ]
+      },
+      {
+        "id": "set_plan",
+        "label": "تغییر پلن",
+        "color": "primary",
+        "actions": [
+          {
+            "type": "owner_panel_show",
+            "view": "plans",
+            "targetId": "{{callback.args.0}}"
+          }
+        ]
+      },
+      {
+        "id": "set_quota",
+        "label": "تنظیم سقف ماهانه",
+        "color": "primary",
+        "actions": [
+          {
+            "type": "owner_panel_show",
+            "view": "quotas",
+            "targetId": "{{callback.args.0}}"
+          }
+        ]
+      }
+    ],
+    "buttons": {
+      "openTarget": "🔗 باز کردن مقصد",
+      "backToList": "⬅️ بازگشت به فهرست",
+      "home": "🏠 خانه",
+      "previousPage": "⬅️ قبلی",
+      "nextPage": "بعدی ➡️",
+      "refresh": "🔄 تازه‌سازی",
+      "back": "⬅️ بازگشت",
+      "customQuota": "سقف دلخواه با دستور",
+      "setPlan": "تغییر پلن",
+      "setQuota": "سقف دلخواه"
+    },
+    "homeActions": []
   }
 }
