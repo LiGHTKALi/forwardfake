@@ -5,9 +5,13 @@ workers_dev = true
 preview_urls = false
 
 [vars]
-# This is based on the workers.dev subdomain used by the previous Worker.
-# Change only this URL if the Cloudflare account subdomain is different.
+OWNER_TELEGRAM_ID = "8621035125"
+# Keep this URL aligned with the workers.dev domain enabled in the Cloudflare account.
 WEBHOOK_URL = "https://munitos.killerdutchmobin.workers.dev/telegram/webhook"
+
+# Set these as encrypted Cloudflare Worker Secrets, never in this file:
+# BOT_TOKEN
+# WEBHOOK_SECRET
 
 [triggers]
 # One generic tick drives database-defined schedules and queue recovery.

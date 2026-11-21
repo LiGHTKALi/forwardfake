@@ -12,14 +12,11 @@ import {
   validateDatabase,
 } from "./engine.js";
 
-const RUNTIME_VERSION = "8.0.0";
+const RUNTIME_VERSION = "8.0.6";
 const DURABLE_OBJECT_NAME = "munitos-primary";
 
-// Requested fixed credentials from the previous MUNITOS Worker source.
-// Keep these constants private to this file; never write them to logs or responses.
-const EMBEDDED_BOT_TOKEN = "9100041417:AAHYOpFKKTGpBQpdHoTAExwZYzlXPqOtSjg";
-const EMBEDDED_OWNER_TELEGRAM_ID = "8621035125";
-const EMBEDDED_WEBHOOK_SECRET = "75ybHg-JiStAC1ZvzatC2P878iQPWPFq1s-FXmSNvIKOTnio";
+const DEFAULT_OWNER_TELEGRAM_ID = "8621035125";
+const MENU_IDLE_SECONDS = 600;
 
 const MAX_UPDATE_BYTES = 2_000_000;
 const MAX_DATABASE_BYTES = 1_500_000;
@@ -41,8 +38,39 @@ function asString(value) {
   return value == null ? "" : String(value);
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+  })[character]);
+}
+
+function collectCallbackData(markup) {
+  const keyboard = markup?.inline_keyboard;
+  if (!Array.isArray(keyboard)) return [];
+  return keyboard.flatMap((row) => Array.isArray(row) ? row.map((button) => String(button?.callback_data || "")) : []);
+}
+
+function detectMenuType(context, markup) {
+  const data = collectCallbackData(markup);
+  if (context.chat?.type === "private" && context.owner?.isOwner) return "owner";
+  if (["group", "supergroup"].includes(context.chat?.type) && data.some((value) => value.startsWith("group:"))) return "groupAdmin";
+  if (["group", "supergroup"].includes(context.chat?.type)) return "groupMember";
+  return "user";
+}
+
 function parseJson(value, fallback = null) {
   try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function applyMenuTemplate(value, variables) {
+  if (typeof value === "string") {
+    return value.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_match, key) => String(variables[key] ?? ""));
+  }
+  if (Array.isArray(value)) return value.map((item) => applyMenuTemplate(item, variables));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, applyMenuTemplate(item, variables)]));
+  }
+  return value;
 }
 
 function utf8Size(value) {
@@ -179,6 +207,7 @@ export class MunitosRuntime extends DurableObject {
     super(ctx, env);
     this.ctx = ctx;
     this.env = env;
+    this.ownerId = String(env.OWNER_TELEGRAM_ID || DEFAULT_OWNER_TELEGRAM_ID);
     this.sql = ctx.storage.sql;
     this.databaseCache = null;
     this.telegramNextAt = 0;
@@ -210,6 +239,19 @@ export class MunitosRuntime extends DurableObject {
         updated_at INTEGER NOT NULL
       )
     `);
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS menu_sessions (
+        chat_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        opener_user_id TEXT NOT NULL,
+        menu_type TEXT NOT NULL,
+        last_activity INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        PRIMARY KEY (chat_id, message_id)
+      )
+    `);
+    this.sql.exec("CREATE INDEX IF NOT EXISTS menu_sessions_expiry ON menu_sessions(status, expires_at)");
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS queued_jobs (
         id TEXT PRIMARY KEY,
@@ -275,7 +317,6 @@ export class MunitosRuntime extends DurableObject {
         now,
         iso: new Date(now).toISOString(),
         webhookUrl: String(this.env.WEBHOOK_URL || ""),
-        webhookSecret: EMBEDDED_WEBHOOK_SECRET,
         botToken: undefined,
         profile: database.profile || { name: "MUNITOS" },
         commandMenu: buildCommandMenu(database, false),
@@ -289,14 +330,14 @@ export class MunitosRuntime extends DurableObject {
         maxWebhookConnections: Math.min(100, Math.max(1, Number(database.telegram?.webhook?.maxConnections) || 40)),
         storage: "durable-object-sqlite",
       },
-      owner: { id: Number(EMBEDDED_OWNER_TELEGRAM_ID) },
+      owner: { id: Number(this.ownerId) },
       bot: { username: String(this.getRawState("global:bot:username") || "") },
     };
   }
 
   buildContext(update, database, now = Date.now()) {
     const { message, chat, user } = extractUpdateContext(update);
-    const owner = Boolean(user && String(user.id) === EMBEDDED_OWNER_TELEGRAM_ID);
+    const owner = Boolean(user && String(user.id) === this.ownerId);
     return {
       ...this.runtimeContext(database, now),
       update,
@@ -309,7 +350,7 @@ export class MunitosRuntime extends DurableObject {
       myChatMember: update?.my_chat_member || null,
       chatMember: update?.chat_member || null,
       joinRequest: update?.chat_join_request || null,
-      owner: { id: Number(EMBEDDED_OWNER_TELEGRAM_ID), isOwner: owner },
+      owner: { id: Number(this.ownerId), isOwner: owner },
       features: database.features || {},
       modules: database.modules || {},
       policies: database.policies || {},
@@ -443,11 +484,228 @@ export class MunitosRuntime extends DurableObject {
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
   }
 
-  async callTelegram(method, payload = {}, files = {}, options = {}) {
+  menuSession(chatId, messageId) {
+    return this.sql.exec(
+      "SELECT chat_id, message_id, opener_user_id, menu_type, last_activity, expires_at, status FROM menu_sessions WHERE chat_id = ? AND message_id = ?",
+      String(chatId), String(messageId),
+    ).toArray()[0] || null;
+  }
+
+  async rememberMenu(message, context, markup) {
+    if (!message?.chat?.id || !message?.message_id || !context?.user?.id) return;
+    const chatId = String(message.chat.id);
+    const messageId = String(message.message_id);
+    const now = Date.now();
+    const type = detectMenuType(context, markup);
+    this.sql.exec(
+      "INSERT INTO menu_sessions (chat_id, message_id, opener_user_id, menu_type, last_activity, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, 'active') ON CONFLICT(chat_id, message_id) DO UPDATE SET opener_user_id = excluded.opener_user_id, menu_type = excluded.menu_type, last_activity = excluded.last_activity, expires_at = excluded.expires_at, status = 'active'",
+      chatId, messageId, String(context.user.id), type, now, now + MENU_IDLE_SECONDS * 1000,
+    );
+    await this.scheduleNextAlarm();
+  }
+
+  async touchMenu(context) {
+    const callback = context?.callback;
+    const message = callback?.message;
+    if (!message?.chat?.id || !message?.message_id) return false;
+    const now = Date.now();
+    const result = this.sql.exec(
+      "UPDATE menu_sessions SET last_activity = ?, expires_at = ?, status = 'active' WHERE chat_id = ? AND message_id = ? AND status = 'active' AND expires_at > ?",
+      now, now + MENU_IDLE_SECONDS * 1000, String(message.chat.id), String(message.message_id), now,
+    );
+    const changed = Number(result?.rowsWritten || 0) > 0;
+    if (changed) await this.scheduleNextAlarm();
+    return changed;
+  }
+
+  async answerCallback(context, text, showAlert = true) {
+    if (!context?.callback?.id) return;
+    try {
+      await this.callTelegram("answerCallbackQuery", {
+        callback_query_id: context.callback.id,
+        text: String(text || "").slice(0, 180),
+        show_alert: showAlert,
+      });
+    } catch (error) {
+      this.logSync("warn", "menu.callback_answer_failed", String(error?.message || error).slice(0, 300));
+    }
+  }
+
+  async authorizeMenuCallback(context, database) {
+    const callback = context.callback;
+    const message = callback?.message;
+    const userId = String(context.user?.id || "");
+    if (!callback?.id) return false;
+    if (!message?.chat?.id || !message?.message_id || !userId) {
+      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.invalid || "منوی نامعتبر است.");
+      return false;
+    }
+    const session = this.menuSession(message.chat.id, message.message_id);
+    if (!session || session.status !== "active" || Number(session.expires_at) <= Date.now()) {
+      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.expired || "این منو منقضی شده است.");
+      return false;
+    }
+    if (String(session.opener_user_id) !== userId) {
+      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.otherUser || "این منو متعلق به شخص دیگری است.");
+      return false;
+    }
+    if (session.menu_type === "owner") {
+      if (userId !== this.ownerId || message.chat.type !== "private") {
+        await this.answerCallback(context, database.ui?.messages?.menuSecurity?.ownerOnly || "دسترسی مالک لازم است.");
+        return false;
+      }
+    } else if (session.menu_type === "groupAdmin") {
+      if (!["group", "supergroup"].includes(message.chat.type) || !await this.checkChatAdmin(message.chat.id, userId, database)) {
+        await this.answerCallback(context, database.ui?.messages?.menuSecurity?.groupAdminOnly || "دسترسی مدیر گروه لازم است.");
+        return false;
+      }
+    }
+    const touched = await this.touchMenu(context);
+    if (!touched) {
+      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.inactive || "این منو منقضی شده است.");
+      return false;
+    }
+    return true;
+  }
+
+  async expireMenus(now = Date.now()) {
+    this.sql.exec(
+      "DELETE FROM menu_sessions WHERE status = 'expired' AND expires_at < ?",
+      now - 30 * 24 * 60 * 60 * 1000,
+    );
+    const expired = this.sql.exec(
+      "SELECT chat_id, message_id, menu_type FROM menu_sessions WHERE status = 'active' AND expires_at <= ? ORDER BY expires_at LIMIT 100",
+      now,
+    ).toArray();
+    for (const session of expired) {
+      const type = session.menu_type;
+      const messages = this.loadDatabase().ui?.messages?.menuExpiry || {};
+      const message = type === "owner" || type === "groupAdmin"
+        ? messages.admin || "منوی ادمین پس از ۱۰ دقیقه بلااستفاده بودن بسته شد."
+        : messages.user || "منوی یوزر پس از ۱۰ دقیقه بلااستفاده بودن بسته شد.";
+      try {
+        await this.callTelegram("editMessageText", {
+          chat_id: session.chat_id,
+          message_id: Number(session.message_id),
+          text: message,
+          reply_markup: { inline_keyboard: [] },
+          link_preview_options: { is_disabled: true },
+        });
+      } catch (error) {
+        const detail = String(error?.message || error);
+        if (!detail.includes("message is not modified") && !detail.includes("message to edit not found")) {
+          this.logSync("warn", "menu.expiry_edit_failed", `${session.chat_id}:${session.message_id}:${detail.slice(0, 250)}`);
+        }
+      }
+      this.sql.exec(
+        "UPDATE menu_sessions SET status = 'expired' WHERE chat_id = ? AND message_id = ? AND status = 'active'",
+        session.chat_id, session.message_id,
+      );
+    }
+    if (expired.length) await this.scheduleNextAlarm();
+    return expired.length;
+  }
+
+  async renderOwnerTargets(context, database) {
+    if (!context.owner?.isOwner || context.chat?.type !== "private" || String(context.user?.id) !== this.ownerId) {
+      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.ownerTargetsOnly || "فقط مالک ربات به این بخش دسترسی دارد.");
+      return false;
+    }
+    const config = database.ui?.owner?.targets;
+    if (!config || typeof config !== "object") throw new Error("owner_targets_ui_config_missing");
+    const kind = context.kind === "channels" ? "channels" : "groups";
+    const prefix = `global:registry:${kind}:`;
+    const rows = this.sql.exec(
+      "SELECT key, value FROM operational_state WHERE substr(key, 1, ?) = ? ORDER BY key LIMIT 2000",
+      prefix.length, prefix,
+    ).toArray();
+    const pageSize = Math.min(10, Math.max(1, Number(config.pageSize) || 6));
+    const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+    const requestedPage = Math.max(0, Number.parseInt(String(context.page ?? "0"), 10) || 0);
+    const page = Math.min(requestedPage, pageCount - 1);
+    const selected = rows.slice(page * pageSize, (page + 1) * pageSize);
+    const buttons = selected.map((row) => {
+      const record = parseJson(row.value, {}) || {};
+      const id = row.key.slice(prefix.length);
+      const active = record.active !== false;
+      const title = String(record.title || record.username || id).replace(/[\r\n]+/g, " ").slice(0, 42);
+      const variables = {
+        id,
+        title,
+        status: active ? config.activeMark || "🟢" : config.inactiveMark || "🔴",
+      };
+      return [applyMenuTemplate(config.targetButton, variables)];
+    });
+    if (page > 0 || page + 1 < pageCount) {
+      const navigation = [];
+      if (page > 0) navigation.push(applyMenuTemplate(config.previousButton, { kind, page: page - 1 }));
+      if (page + 1 < pageCount) navigation.push(applyMenuTemplate(config.nextButton, { kind, page: page + 1 }));
+      if (navigation.length) buttons.push(navigation);
+    }
+    for (const row of Array.isArray(config.footerButtons) ? config.footerButtons : []) {
+      if (Array.isArray(row) && row.length) buttons.push(applyMenuTemplate(row, { kind, page }));
+    }
+    const title = kind === "groups" ? config.groupsTitle : config.channelsTitle;
+    const text = applyMenuTemplate(config.text, {
+      title: title || (kind === "groups" ? "گروه‌ها" : "کانال‌ها"),
+      count: rows.length,
+      page: page + 1,
+      pageCount,
+      kind,
+    });
+    const callbackMessage = context.callback?.message;
+    const method = callbackMessage ? "editMessageText" : "sendMessage";
+    const payload = {
+      chat_id: context.chat.id,
+      text,
+      parse_mode: database.ui?.style?.parseMode || "HTML",
+      link_preview_options: { is_disabled: true },
+      reply_markup: { inline_keyboard: buttons },
+    };
+    if (callbackMessage) payload.message_id = callbackMessage.message_id;
+    await this.callTelegram(method, payload, {}, {}, context);
+    return true;
+  }
+
+  async callTelegram(method, payload = {}, files = {}, options = {}, context = {}) {
     const configuredDatabase = this.databaseCache
       || parseJson(this.sql.exec("SELECT source FROM application_config WHERE id = 1").toArray()[0]?.source, DEFAULT_DATABASE);
     if (configuredDatabase?.integrations?.telegram?.enabled === false && options.allowDisabled !== true) throw new Error("telegram_integration_disabled");
-    const apiMethod = String(method || "").trim();
+    let apiMethod = String(method || "").trim();
+    let apiPayload = { ...(payload || {}) };
+    if (apiMethod === "setWebhook") {
+      const webhookSecret = String(this.env.WEBHOOK_SECRET || "").trim();
+      if (!webhookSecret) throw new Error("cloudflare_secret_missing:WEBHOOK_SECRET");
+      apiPayload.secret_token = webhookSecret;
+    }
+    const callbackMessage = context?.callback?.message;
+    const initialMenu = Boolean(apiPayload.reply_markup?.inline_keyboard && context?.message && context?.user?.id && !context?.callback);
+    if (apiMethod === "sendMessage" && callbackMessage && String(apiPayload.chat_id) === String(callbackMessage.chat?.id)
+      && apiPayload.text !== undefined && !(files && Object.keys(files).length)) {
+      apiMethod = "editMessageText";
+      apiPayload.message_id = callbackMessage.message_id;
+      delete apiPayload.reply_to_message_id;
+      delete apiPayload.reply_parameters;
+      delete apiPayload.allow_sending_without_reply;
+      delete apiPayload.message_thread_id;
+      delete apiPayload.disable_notification;
+      delete apiPayload.protect_content;
+      if (apiPayload.reply_markup == null) apiPayload.reply_markup = { inline_keyboard: [] };
+    }
+    if (initialMenu && String(apiPayload.chat_id) === String(context.chat?.id)) {
+      const greetingConfig = configuredDatabase?.ui?.messages?.greeting || {};
+      const firstName = String(context.user.first_name || context.user.username || greetingConfig.fallbackName || "کاربر").slice(0, 64);
+      const greeting = applyMenuTemplate(greetingConfig.template || "{{firstName}} جان، خوش آمدی.", {
+        id: encodeURIComponent(String(context.user.id)),
+        firstName: escapeHtml(firstName),
+      });
+      const menuText = String(apiPayload.text || "");
+      if (!menuText.includes(greetingConfig.marker || "جان، خوش آمدی")) {
+        apiPayload.text = `${greeting}${greetingConfig.separator ?? "\n\n"}${menuText}`;
+      }
+      if (apiPayload.reply_to_message_id == null && context.message.message_id) apiPayload.reply_to_message_id = context.message.message_id;
+      if (!apiPayload.parse_mode) apiPayload.parse_mode = "HTML";
+    }
     if (!/^[A-Za-z][A-Za-z0-9]{1,80}$/.test(apiMethod)) throw new Error("telegram_method_invalid");
     await this.waitTelegramTurn();
     const fileEntries = files && typeof files === "object" ? Object.entries(files) : [];
@@ -455,7 +713,7 @@ export class MunitosRuntime extends DurableObject {
     let headers;
     if (fileEntries.length) {
       const form = new FormData();
-      for (const [key, value] of Object.entries(payload ?? {})) {
+      for (const [key, value] of Object.entries(apiPayload ?? {})) {
         if (value === undefined || value === null) continue;
         form.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
       }
@@ -489,10 +747,12 @@ export class MunitosRuntime extends DurableObject {
       body = form;
       headers = undefined;
     } else {
-      body = JSON.stringify(payload ?? {});
+      body = JSON.stringify(apiPayload ?? {});
       headers = { "content-type": "application/json" };
     }
-    const response = await fetch(`${TELEGRAM_API_BASE}${EMBEDDED_BOT_TOKEN}/${apiMethod}`, {
+    const botToken = String(this.env.BOT_TOKEN || "").trim();
+    if (!botToken) throw new Error("cloudflare_secret_missing:BOT_TOKEN");
+    const response = await fetch(`${TELEGRAM_API_BASE}${botToken}/${apiMethod}`, {
       method: "POST",
       headers,
       body,
@@ -504,7 +764,13 @@ export class MunitosRuntime extends DurableObject {
       const description = String(result?.description || "telegram_api_request_failed").slice(0, 500);
       throw new Error(`telegram_api_${code}:${description}`);
     }
-    return result.result ?? true;
+    const apiResult = result.result ?? true;
+    if (apiMethod === "sendMessage" && initialMenu && apiPayload.reply_markup?.inline_keyboard) {
+      await this.rememberMenu(apiResult, context, apiPayload.reply_markup);
+    } else if (apiMethod === "editMessageText" && callbackMessage) {
+      await this.touchMenu(context);
+    }
+    return apiResult;
   }
 
   async requestExternal(request, context, database) {
@@ -669,12 +935,15 @@ export class MunitosRuntime extends DurableObject {
   }
 
   async scheduleNextAlarm() {
-    if (this.isRuntimePaused()) {
-      await this.ctx.storage.setAlarm(Date.now() + 60_000);
-      return;
-    }
-    const row = this.sql.exec("SELECT MIN(run_at) AS next_at FROM queued_jobs WHERE status = 'pending'").toArray()[0];
-    if (row?.next_at != null) await this.ctx.storage.setAlarm(Math.max(Date.now() + 100, Number(row.next_at)));
+    const now = Date.now();
+    const queueRow = this.isRuntimePaused() ? null
+      : this.sql.exec("SELECT MIN(run_at) AS next_at FROM queued_jobs WHERE status = 'pending'").toArray()[0];
+    const menuRow = this.sql.exec("SELECT MIN(expires_at) AS next_at FROM menu_sessions WHERE status = 'active'").toArray()[0];
+    const candidates = [];
+    if (queueRow?.next_at != null) candidates.push(Number(queueRow.next_at));
+    if (menuRow?.next_at != null) candidates.push(Number(menuRow.next_at));
+    if (this.isRuntimePaused()) candidates.push(now + 60_000);
+    if (candidates.length) await this.ctx.storage.setAlarm(Math.max(now + 100, Math.min(...candidates)));
     else await this.ctx.storage.deleteAlarm();
   }
 
@@ -714,7 +983,13 @@ export class MunitosRuntime extends DurableObject {
   }
 
   async alarm() {
-    return this.runExclusive(() => this.processOneQueueJob(Date.now()));
+    return this.runExclusive(async () => {
+      const now = Date.now();
+      await this.expireMenus(now);
+      await this.processOneQueueJob(now);
+      await this.scheduleNextAlarm();
+      return true;
+    });
   }
 
   getConversationKey(context) {
@@ -755,7 +1030,7 @@ export class MunitosRuntime extends DurableObject {
     const interpreter = new WorkflowInterpreter({
       database,
       io: {
-        telegram: (method, payload, _context, files) => this.callTelegram(method, payload, files),
+        telegram: (method, payload, context, files) => this.callTelegram(method, payload, files, {}, context),
         api: (apiId, definition, input, ctx) => this.callConfiguredApi(apiId, definition, input, ctx, database),
         http: (request, ctx) => this.requestExternal(request, ctx, database),
         state: (operation, args, ctx) => this.stateOperation(operation, args, ctx),
@@ -766,6 +1041,7 @@ export class MunitosRuntime extends DurableObject {
         runtimeStatus: (ctx) => this.runtimeStatus(database, ctx),
         runtimeLogs: (options, ctx) => this.runtimeLogs(options, ctx),
         runtimeControl: (operation, options, ctx) => this.runtimeControl(operation, options, ctx),
+        ownerTargets: (ctx) => this.renderOwnerTargets(ctx, database),
         log: (entry) => this.log(entry),
       },
       limits: {
@@ -781,7 +1057,7 @@ export class MunitosRuntime extends DurableObject {
     const interpreter = new WorkflowInterpreter({
       database,
       io: {
-        telegram: (method, payload, _context, files) => this.callTelegram(method, payload, files),
+        telegram: (method, payload, context, files) => this.callTelegram(method, payload, files, {}, context),
         api: (apiId, definition, input, ctx) => this.callConfiguredApi(apiId, definition, input, ctx, database),
         http: (request, ctx) => this.requestExternal(request, ctx, database),
         state: (operation, args, ctx) => this.stateOperation(operation, args, ctx),
@@ -792,6 +1068,7 @@ export class MunitosRuntime extends DurableObject {
         runtimeStatus: (ctx) => this.runtimeStatus(database, ctx),
         runtimeLogs: (options, ctx) => this.runtimeLogs(options, ctx),
         runtimeControl: (operation, options, ctx) => this.runtimeControl(operation, options, ctx),
+        ownerTargets: (ctx) => this.renderOwnerTargets(ctx, database),
         log: (entry) => this.log(entry),
       },
       limits: {
@@ -809,7 +1086,7 @@ export class MunitosRuntime extends DurableObject {
     if (operation === "pause") {
       this.setRawState(key, {
         pausedAt: Date.now(),
-        by: String(context.user?.id || EMBEDDED_OWNER_TELEGRAM_ID),
+        by: String(context.user?.id || this.ownerId),
         reason: String(options.reason || "").slice(0, 300),
       });
       await this.scheduleNextAlarm();
@@ -978,13 +1255,15 @@ export class MunitosRuntime extends DurableObject {
       if (context.chat?.id) await this.sendInstallerText(context.chat.id, "این دستور فقط برای مالک و در گفتگوی خصوصی فعال است.");
       return;
     }
-    const key = `global:install:session:${EMBEDDED_OWNER_TELEGRAM_ID}`;
+    const key = `global:install:session:${this.ownerId}`;
     this.setRawState(key, { expiresAt: Date.now() + INSTALL_SESSION_SECONDS * 1000 });
     await this.sendInstallerText(context.chat.id, "فایل <code>database.js</code> را به‌صورت Document ارسال کن. فقط ساختار داده‌ای مجاز است؛ کد اجرایی پذیرفته نمی‌شود.", { parse_mode: "HTML" });
   }
 
   async downloadTelegramDocument(fileId) {
-    const fileResponse = await fetch(`${TELEGRAM_API_BASE}${EMBEDDED_BOT_TOKEN}/getFile`, {
+    const botToken = String(this.env.BOT_TOKEN || "").trim();
+    if (!botToken) throw new Error("cloudflare_secret_missing:BOT_TOKEN");
+    const fileResponse = await fetch(`${TELEGRAM_API_BASE}${botToken}/getFile`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ file_id: fileId }),
@@ -993,7 +1272,7 @@ export class MunitosRuntime extends DurableObject {
     if (!fileResponse.ok || fileResult?.ok !== true || !fileResult.result?.file_path) throw new Error("telegram_file_lookup_failed");
     const filePath = String(fileResult.result.file_path);
     if (filePath.includes("..") || filePath.startsWith("/") || filePath.includes("\\")) throw new Error("telegram_file_path_invalid");
-    const response = await fetch(`${TELEGRAM_FILE_BASE}${EMBEDDED_BOT_TOKEN}/${filePath}`);
+    const response = await fetch(`${TELEGRAM_FILE_BASE}${botToken}/${filePath}`);
     if (!response.ok) throw new Error("telegram_file_download_failed");
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > MAX_DATABASE_BYTES) throw new Error("database_file_too_large");
@@ -1026,7 +1305,7 @@ export class MunitosRuntime extends DurableObject {
   }
 
   async installDatabaseDocument(context) {
-    const key = `global:install:session:${EMBEDDED_OWNER_TELEGRAM_ID}`;
+    const key = `global:install:session:${this.ownerId}`;
     const session = this.getRawState(key);
     if (!session || Number(session.expiresAt) < Date.now()) {
       this.deleteRawState(key);
@@ -1131,10 +1410,10 @@ export class MunitosRuntime extends DurableObject {
       if (seen) return { duplicate: true };
     }
 
-    const installSessionKey = `global:install:session:${EMBEDDED_OWNER_TELEGRAM_ID}`;
+    const installSessionKey = `global:install:session:${this.ownerId}`;
     const installIntent = ownerInstallIntent(
       update,
-      EMBEDDED_OWNER_TELEGRAM_ID,
+      this.ownerId,
       String(this.getRawState("global:bot:username") || ""),
       Boolean(this.getRawState(installSessionKey)),
     );
@@ -1157,6 +1436,21 @@ export class MunitosRuntime extends DurableObject {
 
     const database = this.loadDatabase();
     const context = this.buildContext(update, database);
+    if (context.callback && !await this.authorizeMenuCallback(context, database)) {
+      this.markUpdateProcessed(updateId);
+      return { ok: true, callback: "denied" };
+    }
+    if (context.message && context.user?.id) {
+      const conversation = this.getRawState(this.getConversationKey(context));
+      if (conversation && Number(conversation.expiresAt) > Date.now()) {
+        const now = Date.now();
+        this.sql.exec(
+          "UPDATE menu_sessions SET last_activity = ?, expires_at = ? WHERE chat_id = ? AND opener_user_id = ? AND status = 'active' AND expires_at > ?",
+          now, now + MENU_IDLE_SECONDS * 1000, String(context.chat?.id || ""), String(context.user.id), now,
+        );
+        await this.scheduleNextAlarm();
+      }
+    }
     const messageText = context.message?.text || context.message?.caption || "";
     const parsed = parseCommandText(messageText, context.bot.username);
     const commandMatch = matchCommand(database, messageText, context.bot.username);
@@ -1165,7 +1459,7 @@ export class MunitosRuntime extends DurableObject {
       if (parsed?.kind === "slash" && parsed.trigger === "/install") {
         await this.startInstall(context);
       } else if (context.owner.isOwner && isPrivate(context.chat) && context.message?.document) {
-        const installSession = this.getRawState(`global:install:session:${EMBEDDED_OWNER_TELEGRAM_ID}`);
+        const installSession = this.getRawState(`global:install:session:${this.ownerId}`);
         if (installSession) await this.installDatabaseDocument(context);
         else await this.dispatchEvents(update, context, database);
       } else {
@@ -1193,6 +1487,7 @@ export class MunitosRuntime extends DurableObject {
   }
 
   async tickLocked(now = Date.now()) {
+    await this.expireMenus(now);
     if (this.isRuntimePaused()) {
       await this.scheduleNextAlarm();
       return { ok: true, paused: true };
@@ -1246,8 +1541,10 @@ export default {
       return jsonResponse({ ok: false, error: "not_found" }, 404);
     }
 
+    const configuredSecret = String(env.WEBHOOK_SECRET || "").trim();
+    if (!configuredSecret) return jsonResponse({ ok: false, error: "webhook_secret_not_configured" }, 503);
     const secret = request.headers.get("x-telegram-bot-api-secret-token") || "";
-    if (secret !== EMBEDDED_WEBHOOK_SECRET) return jsonResponse({ ok: false, error: "unauthorized" }, 401);
+    if (secret !== configuredSecret) return jsonResponse({ ok: false, error: "unauthorized" }, 401);
 
     const contentLength = Number(request.headers.get("content-length") || 0);
     if (contentLength > MAX_UPDATE_BYTES) return jsonResponse({ ok: false, error: "update_too_large" }, 413);

@@ -1,9 +1,9 @@
 export default {
   "manifest": {
     "name": "MUNITOS",
-    "version": "8.0.5",
+    "version": "8.0.6",
     "schemaVersion": 1,
-    "description": "MUNITOS 8.0.5 — legacy command parity, polished button interface, force-join and granular group permissions",
+    "description": "MUNITOS 8.0.6 — owner identity, secured menu sessions, single-message navigation and automatic menu expiry",
     "locale": "fa"
   },
   "settings": {
@@ -70,7 +70,7 @@ export default {
     }
   },
   "policies": {
-    "ownerIdSource": "embedded-worker",
+    "ownerIdSource": "cloudflare-environment-variable",
     "groupAdminStatuses": [
       "creator",
       "administrator"
@@ -3260,7 +3260,6 @@ export default {
           "method": "setWebhook",
           "payload": {
             "url": "{{runtime.webhookUrl}}",
-            "secret_token": "{{runtime.webhookSecret}}",
             "allowed_updates": "{{runtime.allowedUpdates}}",
             "drop_pending_updates": "{{runtime.dropPendingUpdates}}",
             "max_connections": "{{runtime.maxWebhookConnections}}"
@@ -3317,463 +3316,7 @@ export default {
     "owner.targets.list": {
       "actions": [
         {
-          "type": "state.list",
-          "scope": "global",
-          "prefix": "registry:{{kind}}:",
-          "limit": 2000,
-          "as": "registry"
-        },
-        {
-          "type": "context.set",
-          "path": "page",
-          "value": {
-            "$expr": {
-              "op": "max",
-              "args": [
-                0,
-                "{{page}}"
-              ]
-            }
-          }
-        },
-        {
-          "type": "context.set",
-          "path": "pageStart",
-          "value": {
-            "$expr": {
-              "op": "multiply",
-              "args": [
-                "{{page}}",
-                6
-              ]
-            }
-          }
-        },
-        {
-          "type": "context.set",
-          "path": "pageEnd",
-          "value": {
-            "$expr": {
-              "op": "add",
-              "args": [
-                "{{pageStart}}",
-                6
-              ]
-            }
-          }
-        },
-        {
-          "type": "context.set",
-          "path": "pageNumber",
-          "value": {
-            "$expr": {
-              "op": "add",
-              "args": [
-                "{{page}}",
-                1
-              ]
-            }
-          }
-        },
-        {
-          "type": "context.set",
-          "path": "prevPage",
-          "value": {
-            "$expr": {
-              "op": "max",
-              "args": [
-                0,
-                {
-                  "$expr": {
-                    "op": "subtract",
-                    "args": [
-                      "{{page}}",
-                      1
-                    ]
-                  }
-                }
-              ]
-            }
-          }
-        },
-        {
-          "type": "context.set",
-          "path": "nextPage",
-          "value": {
-            "$expr": {
-              "op": "add",
-              "args": [
-                "{{page}}",
-                1
-              ]
-            }
-          }
-        },
-        {
-          "type": "condition",
-          "if": {
-            "eq": [
-              "{{kind}}",
-              "groups"
-            ]
-          },
-          "then": [
-            {
-              "type": "context.set",
-              "path": "kindTitle",
-              "value": "👥 گروه‌های ثبت‌شده"
-            }
-          ],
-          "else": [
-            {
-              "type": "context.set",
-              "path": "kindTitle",
-              "value": "📣 کانال‌های ثبت‌شده"
-            }
-          ]
-        },
-        {
-          "type": "context.set",
-          "path": "hasPrevious",
-          "value": {
-            "$expr": {
-              "op": "gt",
-              "args": [
-                "{{page}}",
-                0
-              ]
-            }
-          }
-        },
-        {
-          "type": "context.set",
-          "path": "hasNext",
-          "value": {
-            "$expr": {
-              "op": "gt",
-              "args": [
-                "{{registry.count}}",
-                "{{pageEnd}}"
-              ]
-            }
-          }
-        },
-        {
-          "type": "condition",
-          "if": {
-            "eq": [
-              "{{hasPrevious}}",
-              true
-            ]
-          },
-          "then": [
-            {
-              "type": "condition",
-              "if": {
-                "eq": [
-                  "{{hasNext}}",
-                  true
-                ]
-              },
-              "then": [
-                {
-                  "type": "context.set",
-                  "path": "navKeyboard",
-                  "value": [
-                    [
-                      {
-                        "text": "⬅️ صفحه قبل",
-                        "callback_data": "ui:owner:{{kind}}:{{prevPage}}",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "صفحه بعد ➡️",
-                        "callback_data": "ui:owner:{{kind}}:{{nextPage}}",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🏠 پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
-                    ]
-                  ]
-                }
-              ],
-              "else": [
-                {
-                  "type": "context.set",
-                  "path": "navKeyboard",
-                  "value": [
-                    [
-                      {
-                        "text": "⬅️ صفحه قبل",
-                        "callback_data": "ui:owner:{{kind}}:{{prevPage}}",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🏠 پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
-                    ]
-                  ]
-                }
-              ]
-            }
-          ],
-          "else": [
-            {
-              "type": "condition",
-              "if": {
-                "eq": [
-                  "{{hasNext}}",
-                  true
-                ]
-              },
-              "then": [
-                {
-                  "type": "context.set",
-                  "path": "navKeyboard",
-                  "value": [
-                    [
-                      {
-                        "text": "صفحه بعد ➡️",
-                        "callback_data": "ui:owner:{{kind}}:{{nextPage}}",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🏠 پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
-                    ]
-                  ]
-                }
-              ],
-              "else": [
-                {
-                  "type": "context.set",
-                  "path": "navKeyboard",
-                  "value": [
-                    [
-                      {
-                        "text": "🏠 پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
-                    ]
-                  ]
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>{{kindTitle}}</b>\n\nتعداد مقصدهای ثبت‌شده: <b>{{registry.count}}</b>\nصفحه: <b>{{pageNumber}}</b>\n\nوضعیت عضویت و اجازه ارسال پس از شناسایی یا Auto Repair تکمیل می‌شود.\nبرای جزئیات هر مقصد، کارت مربوط را انتخاب کن.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
-            },
-            "reply_markup": {
-              "inline_keyboard": {
-                "$expr": {
-                  "op": "get",
-                  "path": "navKeyboard"
-                }
-              }
-            }
-          }
-        },
-        {
-          "type": "each",
-          "items": {
-            "$expr": {
-              "op": "slice",
-              "args": [
-                "{{registry.items}}",
-                "{{pageStart}}",
-                "{{pageEnd}}"
-              ]
-            }
-          },
-          "as": "target",
-          "limit": 6,
-          "actions": [
-            {
-              "type": "condition",
-              "if": {
-                "eq": [
-                  "{{target.value.active}}",
-                  true
-                ]
-              },
-              "then": [
-                {
-                  "type": "context.set",
-                  "path": "targetStatusText",
-                  "value": "🟢 فعال"
-                }
-              ],
-              "else": [
-                {
-                  "type": "context.set",
-                  "path": "targetStatusText",
-                  "value": "🔴 غیرفعال"
-                }
-              ]
-            },
-            {
-              "type": "context.set",
-              "path": "targetButtonStyle",
-              "value": "danger"
-            },
-            {
-              "type": "condition",
-              "if": {
-                "eq": [
-                  "{{target.value.active}}",
-                  true
-                ]
-              },
-              "then": [
-                {
-                  "type": "context.set",
-                  "path": "targetButtonStyle",
-                  "value": "success"
-                }
-              ],
-              "else": []
-            },
-            {
-              "type": "context.set",
-              "path": "targetTypeText",
-              "value": "گروه"
-            },
-            {
-              "type": "condition",
-              "if": {
-                "eq": [
-                  "{{target.value.type}}",
-                  "channel"
-                ]
-              },
-              "then": [
-                {
-                  "type": "context.set",
-                  "path": "targetTypeText",
-                  "value": "کانال"
-                }
-              ],
-              "else": []
-            },
-            {
-              "type": "context.set",
-              "path": "targetCanSendText",
-              "value": "نیازمند بررسی"
-            },
-            {
-              "type": "condition",
-              "if": {
-                "eq": [
-                  "{{target.value.canSend}}",
-                  true
-                ]
-              },
-              "then": [
-                {
-                  "type": "context.set",
-                  "path": "targetCanSendText",
-                  "value": "مجاز"
-                }
-              ],
-              "else": [
-                {
-                  "type": "context.set",
-                  "path": "targetCanSendText",
-                  "value": "غیرمجاز"
-                }
-              ]
-            },
-            {
-              "type": "condition",
-              "if": {
-                "eq": [
-                  "{{target.value.verificationState}}",
-                  "partial"
-                ]
-              },
-              "then": [
-                {
-                  "type": "context.set",
-                  "path": "targetCanSendText",
-                  "value": "نیازمند بررسی"
-                }
-              ],
-              "else": []
-            },
-            {
-              "type": "context.set",
-              "path": "targetButtonLabel",
-              "value": {
-                "$expr": {
-                  "op": "concat",
-                  "args": [
-                    "{{targetStatusText}}",
-                    " · ",
-                    {
-                      "$expr": {
-                        "op": "slice",
-                        "args": [
-                          "{{target.value.title}}",
-                          0,
-                          40
-                        ]
-                      }
-                    }
-                  ]
-                }
-              }
-            },
-            {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>{{target.value.title}}</b>\n<code>{{target.value.id}}</code> · {{targetTypeText}}\nوضعیت: <b>{{targetStatusText}}</b> · ارسال: <b>{{targetCanSendText}}</b>",
-                "link_preview_options": {
-                  "is_disabled": true
-                },
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "{{targetButtonLabel}}",
-                        "callback_data": "ui:target:{{target.value.id}}",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "✉️ پیام اختصاصی",
-                        "callback_data": "ui:target:message:{{target.value.id}}",
-                        "style": "primary"
-                      }
-                    ]
-                  ]
-                },
-                "parse_mode": "HTML"
-              }
-            }
-          ]
+          "type": "owner.targets.list"
         }
       ]
     },
@@ -12303,6 +11846,39 @@ export default {
       ]
     },
     {
+      "id": "group.templates.open",
+      "module": "group_management",
+      "on": "callback_query",
+      "match": {
+        "callbackPrefix": "group:templates",
+        "condition": {
+          "eq": [
+            "{{callback.data}}",
+            "group:templates"
+          ]
+        }
+      },
+      "actions": [
+        {
+          "type": "telegram.call",
+          "method": "answerCallbackQuery",
+          "payload": {
+            "callback_query_id": "{{callback.id}}"
+          }
+        },
+        {
+          "type": "workflow.run",
+          "workflow": "guard.group.admin",
+          "input": {}
+        },
+        {
+          "type": "workflow.run",
+          "workflow": "group.panel.render",
+          "input": {}
+        }
+      ]
+    },
+    {
       "id": "group.templates.reset",
       "module": "group_management",
       "on": "callback_query",
@@ -12467,9 +12043,30 @@ export default {
         "destructive": "danger"
       }
     },
+    "messages": {
+      "greeting": {
+        "template": "<a href=\"tg://user?id={{id}}\">{{firstName}}</a> جان، خوش آمدی.",
+        "marker": "جان، خوش آمدی",
+        "separator": "\n\n",
+        "fallbackName": "کاربر"
+      },
+      "menuExpiry": {
+        "admin": "منوی ادمین به‌صورت خودکار پس از ۱۰ دقیقه بلااستفاده بودن بسته شد.\nبرای بازکردن دوباره، دستور /admin یا /group را ارسال کنید.",
+        "user": "منوی یوزر به‌صورت خودکار پس از ۱۰ دقیقه بلااستفاده بودن بسته شد.\nبرای بازکردن دوباره، دستور /start را ارسال کنید."
+      },
+      "menuSecurity": {
+        "invalid": "اطلاعات این منو معتبر نیست. دوباره منو را باز کنید.",
+        "expired": "این منو منقضی شده است. دوباره /start یا دستور مربوط را ارسال کنید.",
+        "otherUser": "این منو متعلق به شخص دیگری است. منوی شخصی خودتان را باز کنید.",
+        "ownerOnly": "این پنل فقط برای مالک ربات در گفت‌وگوی خصوصی فعال است.",
+        "groupAdminOnly": "دسترسی مدیر گروه برای شما تأیید نشد. پنل فقط برای مدیر واقعی گروه فعال است.",
+        "inactive": "زمان این منو به پایان رسیده است. دوباره منو را باز کنید.",
+        "ownerTargetsOnly": "فقط مالک ربات به این بخش دسترسی دارد."
+      }
+    },
     "home": {
       "user": {
-        "text": "<b>به MUNITOS خوش آمدید.</b>\nابزارهای شخصی و راهنمای استفاده را از منوی زیر باز کنید.",
+        "text": "<b>منوی کاربری MUNITOS</b>\nابزارهای شخصی و راهنمای استفاده را از منوی زیر باز کنید.",
         "keyboard": [
           [
             {
@@ -12493,7 +12090,7 @@ export default {
         ]
       },
       "owner": {
-        "text": "<b>خوش آمدید، مالک MUNITOS.</b>\n\nپنل مرکزی برای مدیریت گروه‌ها، کانال‌ها، پلن‌ها، عضویت اجباری و پردازش‌های ربات آماده است.",
+        "text": "<b>پنل مرکزی مدیریت MUNITOS</b>\n\nمدیریت گروه‌ها، کانال‌ها، پلن‌ها، عضویت اجباری و پردازش‌های ربات از این بخش انجام می‌شود.",
         "keyboard": [
           [
             {
@@ -12565,7 +12162,7 @@ export default {
         ]
       },
       "privateUser": {
-        "text": "<b>به MUNITOS خوش آمدید.</b>\nابزارهای شخصی و راهنمای استفاده را از منوی زیر باز کنید.",
+        "text": "<b>منوی کاربری MUNITOS</b>\nابزارهای شخصی و راهنمای استفاده را از منوی زیر باز کنید.",
         "keyboard": [
           [
             {
@@ -13038,6 +12635,50 @@ export default {
             {
               "text": "🏠 منوی اصلی",
               "callback_data": "ui:home",
+              "style": "primary"
+            }
+          ]
+        ]
+      },
+      "targets": {
+        "pageSize": 6,
+        "groupsTitle": "👥 فهرست گروه‌های MUNITOS",
+        "channelsTitle": "📣 فهرست کانال‌های MUNITOS",
+        "text": "<b>{{title}}</b>\n\nتعداد مقصدهای ثبت‌شده: <b>{{count}}</b>\nصفحه: <b>{{page}}/{{pageCount}}</b>\n\nوضعیت سبز: فعال · وضعیت قرمز: غیرفعال\nبرای مشاهده جزئیات، مقصد موردنظر را انتخاب کنید.",
+        "activeMark": "🟢",
+        "inactiveMark": "🔴",
+        "targetButton": {
+          "text": "{{status}} {{title}}",
+          "callback_data": "ui:target:{{id}}",
+          "style": "primary"
+        },
+        "previousButton": {
+          "text": "⬅️ صفحه قبل",
+          "callback_data": "ui:owner:{{kind}}:{{page}}",
+          "style": "primary"
+        },
+        "nextButton": {
+          "text": "صفحه بعد ➡️",
+          "callback_data": "ui:owner:{{kind}}:{{page}}",
+          "style": "primary"
+        },
+        "footerButtons": [
+          [
+            {
+              "text": "👥 گروه‌ها",
+              "callback_data": "ui:owner:groups:0",
+              "style": "primary"
+            },
+            {
+              "text": "📣 کانال‌ها",
+              "callback_data": "ui:owner:channels:0",
+              "style": "primary"
+            }
+          ],
+          [
+            {
+              "text": "🏠 پنل مدیریت",
+              "callback_data": "ui:owner:home",
               "style": "primary"
             }
           ]

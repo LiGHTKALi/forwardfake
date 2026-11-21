@@ -4,7 +4,7 @@ const ACTION_TYPES = new Set([
   "state.get", "state.set", "state.delete", "state.increment", "state.list",
   "context.set", "context.merge", "condition", "each", "while", "workflow.run",
   "queue.enqueue", "queue.list", "queue.stats", "queue.retry", "queue.cancel", "conversation.start", "conversation.end", "conversation.update",
-  "quota.get", "quota.consume", "runtime.status", "runtime.logs", "runtime.control", "log.write", "flow.return", "try", "throw",
+  "quota.get", "quota.consume", "runtime.status", "runtime.logs", "runtime.control", "owner.targets.list", "log.write", "flow.return", "try", "throw",
 ]);
 
 export class DatabaseParseError extends Error {
@@ -660,6 +660,9 @@ export class WorkflowInterpreter {
         const options = resolveValue(action, context);
         return this.io.runtimeControl(String(options.operation || ""), options, context);
       }
+      case "owner.targets.list":
+        if (typeof this.io.ownerTargets !== "function") throw new Error("owner_targets_handler_unavailable");
+        return this.io.ownerTargets(context);
       case "log.write": {
         const entry = resolveValue(action.entry || {}, context);
         return this.io.log(entry, context);
@@ -714,7 +717,7 @@ export function extractUpdateContext(update) {
     || update?.chat_member?.chat || update?.chat_join_request?.chat
     || findNestedObject(update, (value) => Number.isInteger(Number(value.id)) && ["private", "group", "supergroup", "channel"].includes(value.type))
     || null;
-  const user = message?.from || update?.callback_query?.from || update?.my_chat_member?.from
+  const user = update?.callback_query?.from || message?.from || update?.my_chat_member?.from
     || update?.chat_member?.from || update?.chat_join_request?.from || update?.inline_query?.from
     || update?.chosen_inline_result?.from
     || findNestedObject(update, (value) => Number.isInteger(Number(value.id)) && (typeof value.is_bot === "boolean" || typeof value.first_name === "string"))
