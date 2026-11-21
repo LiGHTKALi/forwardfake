@@ -1,9 +1,9 @@
 export default {
   "manifest": {
     "name": "MUNITOS",
-    "version": "8.0.6",
+    "version": "8.1.0",
     "schemaVersion": 1,
-    "description": "MUNITOS 8.0.6 — owner identity, secured menu sessions, single-message navigation and automatic menu expiry",
+    "description": "MUNITOS 8.1.0 — stable Cloudflare host runtime with database-defined application and API gateway",
     "locale": "fa"
   },
   "settings": {
@@ -14,7 +14,8 @@ export default {
       "timeoutMs": 12000,
       "maxResponseBytes": 1048576,
       "maxRedirects": 3,
-      "allowInsecureHosts": []
+      "allowInsecureHosts": [],
+      "maxRequestBodyBytes": 1048576
     },
     "execution": {
       "maxActionsPerUpdate": 2000,
@@ -44,7 +45,9 @@ export default {
         "chat_join_request"
       ],
       "dropPendingUpdates": false,
-      "maxConnections": 40
+      "maxConnections": 40,
+      "url": "https://munitos.killerdutchmobin.workers.dev/telegram/webhook",
+      "path": "/telegram/webhook"
     }
   },
   "quotas": {
@@ -70,7 +73,7 @@ export default {
     }
   },
   "policies": {
-    "ownerIdSource": "cloudflare-environment-variable",
+    "ownerIdSource": "database-credentials",
     "groupAdminStatuses": [
       "creator",
       "administrator"
@@ -85,7 +88,6 @@ export default {
       "linkedChatDepth": 1,
       "maximumRegistryScan": 2000,
       "ownerOnlyManualDiscovery": true,
-      "maxAutoRepairPerRun": 2000,
       "maxBroadcastPerRun": 2000
     }
   },
@@ -104,7 +106,7 @@ export default {
     },
     "owner_management": {
       "enabled": true,
-      "description": "پنل مالک، گروه‌ها، کانال‌ها، صف و ارسال همگانی"
+      "description": "پنل مالک، گروه‌ها، کانال‌ها، پردازش و ارسال همگانی"
     }
   },
   "features": {
@@ -244,9 +246,7 @@ export default {
   "resources": {},
   "limits": {},
   "errorHandling": {},
-  "logging": {
-    "maxEntries": 500
-  },
+  "logging": {},
   "storage": {
     "namespaces": [
       "global",
@@ -464,16 +464,8 @@ export default {
           "description": "فهرست کانال‌ها"
         },
         {
-          "command": "repair",
-          "description": "ترمیم خودکار"
-        },
-        {
           "command": "runtime",
           "description": "وضعیت Runtime"
-        },
-        {
-          "command": "runtime_logs",
-          "description": "گزارش‌های Runtime"
         },
         {
           "command": "runtime_queue",
@@ -488,9 +480,111 @@ export default {
           "description": "ادامه صف پس‌زمینه"
         }
       ]
+    },
+    "idleTimeoutSeconds": 600,
+    "classification": {
+      "groupAdminCallbackPrefixes": [
+        "group:"
+      ]
     }
   },
-  "apis": {},
+  "apis": {
+    "telegram.answerCallbackQuery": {
+      "provider": "telegram",
+      "method": "answerCallbackQuery",
+      "description": "Telegram Bot API: answerCallbackQuery"
+    },
+    "telegram.banChatMember": {
+      "provider": "telegram",
+      "method": "banChatMember",
+      "description": "Telegram Bot API: banChatMember"
+    },
+    "telegram.copyMessage": {
+      "provider": "telegram",
+      "method": "copyMessage",
+      "description": "Telegram Bot API: copyMessage"
+    },
+    "telegram.createChatInviteLink": {
+      "provider": "telegram",
+      "method": "createChatInviteLink",
+      "description": "Telegram Bot API: createChatInviteLink"
+    },
+    "telegram.deleteMessage": {
+      "provider": "telegram",
+      "method": "deleteMessage",
+      "description": "Telegram Bot API: deleteMessage"
+    },
+    "telegram.editMessageText": {
+      "provider": "telegram",
+      "method": "editMessageText",
+      "description": "Telegram Bot API: editMessageText"
+    },
+    "telegram.getChat": {
+      "provider": "telegram",
+      "method": "getChat",
+      "description": "Telegram Bot API: getChat"
+    },
+    "telegram.getChatAdministrators": {
+      "provider": "telegram",
+      "method": "getChatAdministrators",
+      "description": "Telegram Bot API: getChatAdministrators"
+    },
+    "telegram.getChatMember": {
+      "provider": "telegram",
+      "method": "getChatMember",
+      "description": "Telegram Bot API: getChatMember"
+    },
+    "telegram.getChatMemberCount": {
+      "provider": "telegram",
+      "method": "getChatMemberCount",
+      "description": "Telegram Bot API: getChatMemberCount"
+    },
+    "telegram.getMe": {
+      "provider": "telegram",
+      "method": "getMe",
+      "description": "Telegram Bot API: getMe"
+    },
+    "telegram.restrictChatMember": {
+      "provider": "telegram",
+      "method": "restrictChatMember",
+      "description": "Telegram Bot API: restrictChatMember"
+    },
+    "telegram.sendMessage": {
+      "provider": "telegram",
+      "method": "sendMessage",
+      "description": "Telegram Bot API: sendMessage"
+    },
+    "telegram.setMyCommands": {
+      "provider": "telegram",
+      "method": "setMyCommands",
+      "description": "Telegram Bot API: setMyCommands"
+    },
+    "telegram.setMyDescription": {
+      "provider": "telegram",
+      "method": "setMyDescription",
+      "description": "Telegram Bot API: setMyDescription"
+    },
+    "telegram.setMyName": {
+      "provider": "telegram",
+      "method": "setMyName",
+      "description": "Telegram Bot API: setMyName"
+    },
+    "telegram.setMyShortDescription": {
+      "provider": "telegram",
+      "method": "setMyShortDescription",
+      "description": "Telegram Bot API: setMyShortDescription"
+    },
+    "telegram.setWebhook": {
+      "provider": "telegram",
+      "method": "setWebhook",
+      "description": "Telegram Bot API: setWebhook"
+    },
+    "telegram.unbanChatMember": {
+      "provider": "telegram",
+      "method": "unbanChatMember",
+      "description": "Telegram Bot API: unbanChatMember"
+    }
+  },
   "commands": {
     "start": {
       "module": "core",
@@ -563,25 +657,27 @@ export default {
           "input": {}
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": {
-              "$expr": {
-                "op": "concat",
-                "args": [
-                  "<b>شناسه کاربر:</b> <code>",
-                  "{{user.id}}",
-                  "</code>\n<b>شناسه گفتگو:</b> <code>",
-                  "{{chat.id}}",
-                  "</code>"
-                ]
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": {
+                "$expr": {
+                  "op": "concat",
+                  "args": [
+                    "<b>شناسه کاربر:</b> <code>",
+                    "{{user.id}}",
+                    "</code>\n<b>شناسه گفتگو:</b> <code>",
+                    "{{chat.id}}",
+                    "</code>"
+                  ]
+                }
+              },
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
               }
-            },
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
             }
           }
         }
@@ -667,24 +763,26 @@ export default {
           "input": {}
         },
         {
-          "type": "telegram.call",
-          "method": "restrictChatMember",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "user_id": "{{targetId}}",
-            "permissions": {
-              "can_send_messages": false,
-              "can_send_audios": false,
-              "can_send_documents": false,
-              "can_send_photos": false,
-              "can_send_videos": false,
-              "can_send_video_notes": false,
-              "can_send_voice_notes": false,
-              "can_send_polls": false,
-              "can_send_other_messages": false,
-              "can_add_web_page_previews": false
-            },
-            "use_independent_chat_permissions": true
+          "type": "api.call",
+          "api": "telegram.restrictChatMember",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "user_id": "{{targetId}}",
+              "permissions": {
+                "can_send_messages": false,
+                "can_send_audios": false,
+                "can_send_documents": false,
+                "can_send_photos": false,
+                "can_send_videos": false,
+                "can_send_video_notes": false,
+                "can_send_voice_notes": false,
+                "can_send_polls": false,
+                "can_send_other_messages": false,
+                "can_add_web_page_previews": false
+              },
+              "use_independent_chat_permissions": true
+            }
           }
         },
         {
@@ -698,14 +796,16 @@ export default {
           }
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>کاربر سکوت شد.</b>\nشناسه: <code>{{targetId}}</code>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>کاربر سکوت شد.</b>\nشناسه: <code>{{targetId}}</code>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -754,24 +854,26 @@ export default {
           "input": {}
         },
         {
-          "type": "telegram.call",
-          "method": "restrictChatMember",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "user_id": "{{targetId}}",
-            "permissions": {
-              "can_send_messages": true,
-              "can_send_audios": true,
-              "can_send_documents": true,
-              "can_send_photos": true,
-              "can_send_videos": true,
-              "can_send_video_notes": true,
-              "can_send_voice_notes": true,
-              "can_send_polls": true,
-              "can_send_other_messages": true,
-              "can_add_web_page_previews": true
-            },
-            "use_independent_chat_permissions": true
+          "type": "api.call",
+          "api": "telegram.restrictChatMember",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "user_id": "{{targetId}}",
+              "permissions": {
+                "can_send_messages": true,
+                "can_send_audios": true,
+                "can_send_documents": true,
+                "can_send_photos": true,
+                "can_send_videos": true,
+                "can_send_video_notes": true,
+                "can_send_voice_notes": true,
+                "can_send_polls": true,
+                "can_send_other_messages": true,
+                "can_add_web_page_previews": true
+              },
+              "use_independent_chat_permissions": true
+            }
           }
         },
         {
@@ -780,14 +882,16 @@ export default {
           "key": "moderation:{{chat.id}}:silent:{{targetId}}"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>محدودیت ارسال پیام برداشته شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>محدودیت ارسال پیام برداشته شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -834,11 +938,13 @@ export default {
           "input": {}
         },
         {
-          "type": "telegram.call",
-          "method": "banChatMember",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "user_id": "{{targetId}}"
+          "type": "api.call",
+          "api": "telegram.banChatMember",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "user_id": "{{targetId}}"
+            }
           }
         },
         {
@@ -852,14 +958,16 @@ export default {
           }
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>کاربر از گروه مسدود شد.</b>\nشناسه: <code>{{targetId}}</code>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>کاربر از گروه مسدود شد.</b>\nشناسه: <code>{{targetId}}</code>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -907,12 +1015,14 @@ export default {
           "input": {}
         },
         {
-          "type": "telegram.call",
-          "method": "unbanChatMember",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "user_id": "{{targetId}}",
-            "only_if_banned": true
+          "type": "api.call",
+          "api": "telegram.unbanChatMember",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "user_id": "{{targetId}}",
+              "only_if_banned": true
+            }
           }
         },
         {
@@ -921,14 +1031,16 @@ export default {
           "key": "moderation:{{chat.id}}:banned:{{targetId}}"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>مسدودیت کاربر لغو شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>مسدودیت کاربر لغو شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -959,14 +1071,16 @@ export default {
           "as": "quotaInfo"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>سهمیه حساب</b>\nجزئیات مصرف در پنل سهمیه نمایش داده می‌شود.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>سهمیه حساب</b>\nجزئیات مصرف در پنل سهمیه نمایش داده می‌شود.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -991,42 +1105,39 @@ export default {
           "as": "status"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>◈ MUNITOS RUNTIME</b>\n━━━━━━━━━━━━━━━━━━\nنسخه موتور: <code>{{status.runtimeVersion}}</code>\nنسخه دیتابیس: <code>{{status.databaseVersion}}</code>\nوضعیت توقف: {{status.paused}}\nفرمان‌ها: {{status.commands}}\nWorkflowها: {{status.workflows}}\nAPIها: {{status.apis}}\nرویدادها: {{status.events}}\nصف در انتظار: {{status.queuedJobs}}\nمقصدهای ثبت‌شده: {{status.registeredChats}}",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
-            },
-            "reply_markup": {
-              "inline_keyboard": [
-                [
-                  {
-                    "text": "⚙️ پنل مدیریت",
-                    "callback_data": "ui:owner:home",
-                    "style": "primary"
-                  },
-                  {
-                    "text": "🧾 وضعیت صف",
-                    "callback_data": "ui:owner:queue",
-                    "style": "primary"
-                  }
-                ],
-                [
-                  {
-                    "text": "📜 گزارش‌ها",
-                    "callback_data": "ui:owner:logs",
-                    "style": "primary"
-                  },
-                  {
-                    "text": "🏠 خانه",
-                    "callback_data": "ui:home",
-                    "style": "primary"
-                  }
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>◈ MUNITOS RUNTIME</b>\n━━━━━━━━━━━━━━━━━━\nنسخه موتور: <code>{{status.runtimeVersion}}</code>\nنسخه دیتابیس: <code>{{status.databaseVersion}}</code>\nوضعیت توقف: {{status.paused}}\nفرمان‌ها: {{status.commands}}\nWorkflowها: {{status.workflows}}\nAPIها: {{status.apis}}\nرویدادها: {{status.events}}\nصف در انتظار: {{status.queuedJobs}}\nمقصدهای ثبت‌شده: {{status.registeredChats}}",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              },
+              "reply_markup": {
+                "inline_keyboard": [
+                  [
+                    {
+                      "text": "⚙️ پنل مدیریت",
+                      "callback_data": "ui:owner:home",
+                      "style": "primary"
+                    },
+                    {
+                      "text": "🧾 وضعیت صف",
+                      "callback_data": "ui:owner:queue",
+                      "style": "primary"
+                    }
+                  ],
+                  [
+                    {
+                      "text": "🏠 خانه",
+                      "callback_data": "ui:home",
+                      "style": "primary"
+                    }
+                  ]
                 ]
-              ]
+              }
             }
           }
         }
@@ -1053,11 +1164,13 @@ export default {
           "as": "control"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "صف و زمان‌بندی‌های پس‌زمینه متوقف شدند. پردازش پیام‌ها و فرمان‌های ورودی ادامه دارد. برای ادامه صف /runtime_resume را بفرست."
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "صف و زمان‌بندی‌های پس‌زمینه متوقف شدند. پردازش پیام‌ها و فرمان‌های ورودی ادامه دارد. برای ادامه صف /runtime_resume را بفرست."
+            }
           }
         }
       ],
@@ -1082,61 +1195,19 @@ export default {
           "as": "control"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "پردازش MUNITOS دوباره فعال شد."
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "پردازش MUNITOS دوباره فعال شد."
+            }
           }
         }
       ],
       "title": "▶️ ادامه صف پس‌زمینه",
       "section": "runtime",
       "usage": "/runtime_resume"
-    },
-    "runtime_logs": {
-      "module": "owner_management",
-      "triggers": [
-        "/runtime_logs"
-      ],
-      "description": "مشاهده گزارش‌های اخیر Runtime",
-      "scope": "private",
-      "roles": [
-        "owner"
-      ],
-      "actions": [
-        {
-          "type": "runtime.logs",
-          "limit": 12,
-          "as": "logs"
-        },
-        {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>گزارش‌های اخیر MUNITOS</b>\n━━━━━━━━━━━━━━━━━━\n<code>{{logs}}</code>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
-            },
-            "reply_markup": {
-              "inline_keyboard": [
-                [
-                  {
-                    "text": "⬅️ پنل مدیریت",
-                    "callback_data": "ui:owner:home",
-                    "style": "primary"
-                  }
-                ]
-              ]
-            }
-          }
-        }
-      ],
-      "title": "📜 گزارش‌های Runtime",
-      "section": "runtime",
-      "usage": "/runtime_logs"
     },
     "runtime_queue": {
       "module": "owner_management",
@@ -1154,30 +1225,32 @@ export default {
           "as": "queueStats"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>صف پردازش MUNITOS</b>\n━━━━━━━━━━━━━━━━━━\nدر انتظار: <b>{{queueStats.pending}}</b>\nدر حال اجرا: <b>{{queueStats.running}}</b>\nناموفق: <b>{{queueStats.failed}}</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
-            },
-            "reply_markup": {
-              "inline_keyboard": [
-                [
-                  {
-                    "text": "🔄 تازه‌سازی",
-                    "callback_data": "ui:owner:queue",
-                    "style": "primary"
-                  },
-                  {
-                    "text": "⬅️ پنل مدیریت",
-                    "callback_data": "ui:owner:home",
-                    "style": "primary"
-                  }
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>صف پردازش MUNITOS</b>\n━━━━━━━━━━━━━━━━━━\nدر انتظار: <b>{{queueStats.pending}}</b>\nدر حال اجرا: <b>{{queueStats.running}}</b>\nناموفق: <b>{{queueStats.failed}}</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              },
+              "reply_markup": {
+                "inline_keyboard": [
+                  [
+                    {
+                      "text": "🔄 تازه‌سازی",
+                      "callback_data": "ui:owner:queue",
+                      "style": "primary"
+                    },
+                    {
+                      "text": "⬅️ پنل مدیریت",
+                      "callback_data": "ui:owner:home",
+                      "style": "primary"
+                    }
+                  ]
                 ]
-              ]
+              }
             }
           }
         }
@@ -1203,11 +1276,13 @@ export default {
           "as": "retryResult"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "نتیجه تلاش مجدد: {{retryResult.retried}}"
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "نتیجه تلاش مجدد: {{retryResult.retried}}"
+            }
           }
         }
       ]
@@ -1229,11 +1304,13 @@ export default {
           "as": "cancelResult"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "نتیجه لغو: {{cancelResult.cancelled}}"
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "نتیجه لغو: {{cancelResult.cancelled}}"
+            }
           }
         }
       ]
@@ -1258,7 +1335,11 @@ export default {
         },
         {
           "type": "workflow.run",
-          "workflow": "owner.targets.list"
+          "workflow": "owner.targets.list",
+          "input": {
+            "kind": "groups",
+            "page": 0
+          }
         }
       ]
     },
@@ -1293,28 +1374,32 @@ export default {
               "value": "{{args.1}}"
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "پلن مقصد <code>{{args.0}}</code> روی <b>{{args.1}}</b> تنظیم شد.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "پلن مقصد <code>{{args.0}}</code> روی <b>{{args.1}}</b> تنظیم شد.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "استفاده: <code>/plan CHAT_ID free|pro|unlimited</code>",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "استفاده: <code>/plan CHAT_ID free|pro|unlimited</code>",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
@@ -1346,11 +1431,13 @@ export default {
           }
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "📢 پیام یا رسانه موردنظر را بفرست. قبل از شروع ارسال، پیش‌نمایش و دکمه تأیید نمایش داده می‌شود.\nبرای لغو /cancel را بفرست."
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "📢 پیام یا رسانه موردنظر را بفرست. قبل از شروع ارسال، پیش‌نمایش و دکمه تأیید نمایش داده می‌شود.\nبرای لغو /cancel را بفرست."
+            }
           }
         }
       ],
@@ -1375,12 +1462,14 @@ export default {
           "type": "conversation.end"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>عملیات جاری لغو شد.</b>",
-            "parse_mode": "HTML"
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>عملیات جاری لغو شد.</b>",
+              "parse_mode": "HTML"
+            }
           }
         }
       ]
@@ -1399,20 +1488,22 @@ export default {
       ],
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "{{runtime.app.ui.owner.home.text}}",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
-            },
-            "reply_markup": {
-              "inline_keyboard": {
-                "$expr": {
-                  "op": "get",
-                  "path": "runtime.app.ui.owner.home.keyboard"
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "{{runtime.app.ui.owner.home.text}}",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              },
+              "reply_markup": {
+                "inline_keyboard": {
+                  "$expr": {
+                    "op": "get",
+                    "path": "runtime.app.ui.owner.home.keyboard"
+                  }
                 }
               }
             }
@@ -1440,7 +1531,11 @@ export default {
         },
         {
           "type": "workflow.run",
-          "workflow": "owner.targets.list"
+          "workflow": "owner.targets.list",
+          "input": {
+            "kind": "channels",
+            "page": 0
+          }
         }
       ]
     },
@@ -1480,7 +1575,6 @@ export default {
           "type": "state.get",
           "scope": "chat",
           "key": "welcome.source",
-          "default": null,
           "as": "savedSource"
         },
         {
@@ -1491,33 +1585,35 @@ export default {
           "as": "savedDelay"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": {
-              "$expr": {
-                "op": "concat",
-                "args": [
-                  "<b>تنظیم خوش‌آمد</b>\nتأخیر: <code>",
-                  "{{savedDelay}}",
-                  "</code> ثانیه\nحالت محتوا: <code>",
-                  {
-                    "$expr": {
-                      "op": "get",
-                      "args": [
-                        "{{savedSource.message_id}}"
-                      ]
-                    }
-                  },
-                  "</code>\n\n<b>متن:</b>\n",
-                  "{{savedText}}"
-                ]
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": {
+                "$expr": {
+                  "op": "concat",
+                  "args": [
+                    "<b>تنظیم خوش‌آمد</b>\nتأخیر: <code>",
+                    "{{savedDelay}}",
+                    "</code> ثانیه\nحالت محتوا: <code>",
+                    {
+                      "$expr": {
+                        "op": "get",
+                        "args": [
+                          "{{savedSource.message_id}}"
+                        ]
+                      }
+                    },
+                    "</code>\n\n<b>متن:</b>\n",
+                    "{{savedText}}"
+                  ]
+                }
+              },
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
               }
-            },
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
             }
           }
         }
@@ -1564,14 +1660,16 @@ export default {
           "key": "welcome.delaySeconds"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>تنظیم خوش‌آمد به حالت پیش‌فرض بازگشت.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>تنظیم خوش‌آمد به حالت پیش‌فرض بازگشت.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -1610,14 +1708,16 @@ export default {
           "value": true
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>خوش‌آمدگویی فعال شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>خوش‌آمدگویی فعال شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -1656,14 +1756,16 @@ export default {
           "value": false
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>خوش‌آمدگویی غیرفعال شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>خوش‌آمدگویی غیرفعال شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -1741,28 +1843,29 @@ export default {
           "type": "state.get",
           "scope": "chat",
           "key": "goodbye.source",
-          "default": null,
           "as": "savedSource"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": {
-              "$expr": {
-                "op": "concat",
-                "args": [
-                  "<b>پیام خداحافظی</b>\nحالت رسانه: <code>",
-                  "{{savedSource.message_id}}",
-                  "</code>\n\n",
-                  "{{savedText}}"
-                ]
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": {
+                "$expr": {
+                  "op": "concat",
+                  "args": [
+                    "<b>پیام خداحافظی</b>\nحالت رسانه: <code>",
+                    "{{savedSource.message_id}}",
+                    "</code>\n\n",
+                    "{{savedText}}"
+                  ]
+                }
+              },
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
               }
-            },
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
             }
           }
         }
@@ -1803,14 +1906,16 @@ export default {
           "key": "goodbye.source"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>خداحافظی به حالت پیش‌فرض بازگشت.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>خداحافظی به حالت پیش‌فرض بازگشت.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -1847,14 +1952,16 @@ export default {
           "value": true
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>خداحافظی فعال شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>خداحافظی فعال شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -1891,14 +1998,16 @@ export default {
           "value": false
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>خداحافظی غیرفعال شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>خداحافظی غیرفعال شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -1935,37 +2044,43 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "getChatMember",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "user_id": "{{reply.from.id}}"
-              },
-              "as": "profile"
+              "type": "api.call",
+              "as": "profile",
+              "api": "telegram.getChatMember",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "user_id": "{{reply.from.id}}"
+                }
+              }
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>اطلاعات کاربر</b>\nنام: {{profile.user.first_name}} {{profile.user.last_name}}\nنام کاربری: @{{profile.user.username}}\nشناسه: <code>{{profile.user.id}}</code>\nوضعیت عضویت: <code>{{profile.status}}</code>\nPremium: {{profile.user.is_premium}}",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>اطلاعات کاربر</b>\nنام: {{profile.user.first_name}} {{profile.user.last_name}}\nنام کاربری: @{{profile.user.username}}\nشناسه: <code>{{profile.user.id}}</code>\nوضعیت عضویت: <code>{{profile.status}}</code>\nPremium: {{profile.user.is_premium}}",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "برای مشاهده اطلاعات، روی پیام کاربر ریپلای کن و <code>/info</code> را بفرست.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "برای مشاهده اطلاعات، روی پیام کاربر ریپلای کن و <code>/info</code> را بفرست.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
@@ -2010,25 +2125,6 @@ export default {
         }
       ]
     },
-    "repair": {
-      "module": "owner_management",
-      "triggers": [
-        "/repair",
-        "/autorepair",
-        "ترمیم خودکار"
-      ],
-      "description": "ترمیم Webhook، تنظیمات Telegram، صف و بررسی دسترسی مقصدها",
-      "scope": "private",
-      "roles": [
-        "owner"
-      ],
-      "actions": [
-        {
-          "type": "workflow.run",
-          "workflow": "system.autorepair"
-        }
-      ]
-    },
     "silent_list": {
       "module": "group_management",
       "feature": "moderation",
@@ -2070,22 +2166,24 @@ export default {
           "limit": 500
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": {
-              "$expr": {
-                "op": "concat",
-                "args": [
-                  "<b>فهرست کاربران سکوت‌شده</b>\nتعداد: ",
-                  "{{moderationEntries.count}}"
-                ]
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": {
+                "$expr": {
+                  "op": "concat",
+                  "args": [
+                    "<b>فهرست کاربران سکوت‌شده</b>\nتعداد: ",
+                    "{{moderationEntries.count}}"
+                  ]
+                }
+              },
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
               }
-            },
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
             }
           }
         },
@@ -2096,23 +2194,25 @@ export default {
           "limit": 100,
           "actions": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": {
-                  "$expr": {
-                    "op": "concat",
-                    "args": [
-                      "شناسه: <code>",
-                      "{{moderationEntry.value.userId}}",
-                      "</code>"
-                    ]
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": {
+                    "$expr": {
+                      "op": "concat",
+                      "args": [
+                        "شناسه: <code>",
+                        "{{moderationEntry.value.userId}}",
+                        "</code>"
+                      ]
+                    }
+                  },
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
                   }
-                },
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
                 }
               }
             }
@@ -2174,24 +2274,26 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "restrictChatMember",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "user_id": "{{moderationEntry.value.userId}}",
-                    "permissions": {
-                      "can_send_messages": true,
-                      "can_send_audios": true,
-                      "can_send_documents": true,
-                      "can_send_photos": true,
-                      "can_send_videos": true,
-                      "can_send_video_notes": true,
-                      "can_send_voice_notes": true,
-                      "can_send_polls": true,
-                      "can_send_other_messages": true,
-                      "can_add_web_page_previews": true
-                    },
-                    "use_independent_chat_permissions": true
+                  "type": "api.call",
+                  "api": "telegram.restrictChatMember",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "user_id": "{{moderationEntry.value.userId}}",
+                      "permissions": {
+                        "can_send_messages": true,
+                        "can_send_audios": true,
+                        "can_send_documents": true,
+                        "can_send_photos": true,
+                        "can_send_videos": true,
+                        "can_send_video_notes": true,
+                        "can_send_voice_notes": true,
+                        "can_send_polls": true,
+                        "can_send_other_messages": true,
+                        "can_add_web_page_previews": true
+                      },
+                      "use_independent_chat_permissions": true
+                    }
                   }
                 },
                 {
@@ -2200,28 +2302,21 @@ export default {
                   "key": "moderation:{{chat.id}}:silent:{{moderationEntry.value.userId}}"
                 }
               ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "warn",
-                    "code": "moderation.cleanup_failed",
-                    "detail": "{{moderationEntry.value.userId}}:{{error.message}}"
-                  }
-                }
-              ]
+              "catch": []
             }
           ]
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>پاک‌سازی فهرست پایان یافت.</b> مواردی که تلگرام اجازه تغییرشان را نداد، در فهرست باقی می‌مانند.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>پاک‌سازی فهرست پایان یافت.</b> مواردی که تلگرام اجازه تغییرشان را نداد، در فهرست باقی می‌مانند.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -2268,22 +2363,24 @@ export default {
           "limit": 500
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": {
-              "$expr": {
-                "op": "concat",
-                "args": [
-                  "<b>فهرست کاربران مسدود</b>\nتعداد: ",
-                  "{{moderationEntries.count}}"
-                ]
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": {
+                "$expr": {
+                  "op": "concat",
+                  "args": [
+                    "<b>فهرست کاربران مسدود</b>\nتعداد: ",
+                    "{{moderationEntries.count}}"
+                  ]
+                }
+              },
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
               }
-            },
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
             }
           }
         },
@@ -2294,23 +2391,25 @@ export default {
           "limit": 100,
           "actions": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": {
-                  "$expr": {
-                    "op": "concat",
-                    "args": [
-                      "شناسه: <code>",
-                      "{{moderationEntry.value.userId}}",
-                      "</code>"
-                    ]
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": {
+                    "$expr": {
+                      "op": "concat",
+                      "args": [
+                        "شناسه: <code>",
+                        "{{moderationEntry.value.userId}}",
+                        "</code>"
+                      ]
+                    }
+                  },
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
                   }
-                },
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
                 }
               }
             }
@@ -2372,12 +2471,14 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "unbanChatMember",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "user_id": "{{moderationEntry.value.userId}}",
-                    "only_if_banned": true
+                  "type": "api.call",
+                  "api": "telegram.unbanChatMember",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "user_id": "{{moderationEntry.value.userId}}",
+                      "only_if_banned": true
+                    }
                   }
                 },
                 {
@@ -2386,28 +2487,21 @@ export default {
                   "key": "moderation:{{chat.id}}:banned:{{moderationEntry.value.userId}}"
                 }
               ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "warn",
-                    "code": "moderation.cleanup_failed",
-                    "detail": "{{moderationEntry.value.userId}}:{{error.message}}"
-                  }
-                }
-              ]
+              "catch": []
             }
           ]
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>پاک‌سازی فهرست پایان یافت.</b> مواردی که تلگرام اجازه تغییرشان را نداد، در فهرست باقی می‌مانند.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>پاک‌سازی فهرست پایان یافت.</b> مواردی که تلگرام اجازه تغییرشان را نداد، در فهرست باقی می‌مانند.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -2582,28 +2676,32 @@ export default {
               }
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>تأخیر خوش‌آمد ذخیره شد.</b>",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>تأخیر خوش‌آمد ذخیره شد.</b>",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "روش استفاده: <code>/setwelcometime 30</code>\nعدد باید بین ۰ تا ۳۶۰۰ ثانیه باشد.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "روش استفاده: <code>/setwelcometime 30</code>\nعدد باید بین ۰ تا ۳۶۰۰ ثانیه باشد.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
@@ -2644,28 +2742,29 @@ export default {
           "type": "state.get",
           "scope": "chat",
           "key": "install.source",
-          "default": null,
           "as": "savedSource"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": {
-              "$expr": {
-                "op": "concat",
-                "args": [
-                  "<b>پیام ورود ربات</b>\nحالت رسانه: <code>",
-                  "{{savedSource.message_id}}",
-                  "</code>\n\n",
-                  "{{savedText}}"
-                ]
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": {
+                "$expr": {
+                  "op": "concat",
+                  "args": [
+                    "<b>پیام ورود ربات</b>\nحالت رسانه: <code>",
+                    "{{savedSource.message_id}}",
+                    "</code>\n\n",
+                    "{{savedText}}"
+                  ]
+                }
+              },
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
               }
-            },
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
             }
           }
         }
@@ -2710,14 +2809,16 @@ export default {
           "value": false
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>پیام ورود ربات بازنشانی شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>پیام ورود ربات بازنشانی شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -2781,14 +2882,16 @@ export default {
           "value": true
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>عضویت اجباری این گروه فعال شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>عضویت اجباری این گروه فعال شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -2822,14 +2925,16 @@ export default {
           "value": false
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>عضویت اجباری این گروه غیرفعال شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>عضویت اجباری این گروه غیرفعال شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -2900,14 +3005,16 @@ export default {
           "value": false
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>عضویت اجباری کاربران خصوصی غیرفعال شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>عضویت اجباری کاربران خصوصی غیرفعال شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -2964,11 +3071,13 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "این پیام قابل ارسال نیست. یک پیام یا رسانه دیگر بفرست."
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "این پیام قابل ارسال نیست. یک پیام یا رسانه دیگر بفرست."
+                }
               }
             },
             {
@@ -2991,27 +3100,29 @@ export default {
           "type": "conversation.end"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "parse_mode": "HTML",
-            "text": "<b>◈ پیش‌نمایش پیام همگانی</b>\n━━━━━━━━━━━━━━━━━━\nپیام دریافت شد و آماده ارسال است.\n\nپس از تأیید، مقصدهای ثبت‌شده بررسی و پیام‌ها به‌صورت صف‌بندی‌شده ارسال می‌شوند.\n\nبرای آغاز ارسال، تأیید را انتخاب کن.",
-            "reply_markup": {
-              "inline_keyboard": [
-                [
-                  {
-                    "text": "✅ تأیید و شروع ارسال",
-                    "callback_data": "ui:broadcast:confirm",
-                    "style": "success"
-                  },
-                  {
-                    "text": "✖️ لغو",
-                    "callback_data": "ui:broadcast:cancel",
-                    "style": "danger"
-                  }
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "parse_mode": "HTML",
+              "text": "<b>◈ پیش‌نمایش پیام همگانی</b>\n━━━━━━━━━━━━━━━━━━\nپیام دریافت شد و آماده ارسال است.\n\nپس از تأیید، مقصدهای ثبت‌شده بررسی و پیام‌ها به‌صورت صف‌بندی‌شده ارسال می‌شوند.\n\nبرای آغاز ارسال، تأیید را انتخاب کن.",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [
+                    {
+                      "text": "✅ تأیید و شروع ارسال",
+                      "callback_data": "ui:broadcast:confirm",
+                      "style": "success"
+                    },
+                    {
+                      "text": "✖️ لغو",
+                      "callback_data": "ui:broadcast:cancel",
+                      "style": "danger"
+                    }
+                  ]
                 ]
-              ]
+              }
             }
           }
         }
@@ -3020,303 +3131,464 @@ export default {
     "broadcast.deliver": {
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "copyMessage",
-          "payload": {
-            "chat_id": "{{job.input.chatId}}",
-            "from_chat_id": "{{job.input.fromChatId}}",
-            "message_id": "{{job.input.messageId}}"
+          "type": "api.call",
+          "api": "telegram.copyMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{job.input.chatId}}",
+              "from_chat_id": "{{job.input.fromChatId}}",
+              "message_id": "{{job.input.messageId}}"
+            }
           }
-        }
-      ]
-    },
-    "system.reconcile": {
-      "actions": [
-        {
-          "type": "telegram.call",
-          "method": "getMe",
-          "payload": {},
-          "as": "botInfo"
-        },
-        {
-          "type": "state.set",
-          "scope": "global",
-          "key": "bot:id",
-          "value": "{{botInfo.id}}"
-        },
-        {
-          "type": "state.set",
-          "scope": "global",
-          "key": "bot:username",
-          "value": "{{botInfo.username}}"
-        },
-        {
-          "type": "state.set",
-          "scope": "global",
-          "key": "bot:first_name",
-          "value": "{{botInfo.first_name}}"
-        },
-        {
-          "type": "try",
-          "actions": [
-            {
-              "type": "telegram.call",
-              "method": "setMyName",
-              "payload": {
-                "name": "{{runtime.profile.name}}"
-              }
-            }
-          ],
-          "catch": [
-            {
-              "type": "log.write",
-              "entry": {
-                "level": "warn",
-                "code": "reconcile.set_name_failed",
-                "detail": "{{error.message}}"
-              }
-            }
-          ]
-        },
-        {
-          "type": "try",
-          "actions": [
-            {
-              "type": "telegram.call",
-              "method": "setMyDescription",
-              "payload": {
-                "description": "{{runtime.profile.description}}"
-              }
-            }
-          ],
-          "catch": [
-            {
-              "type": "log.write",
-              "entry": {
-                "level": "warn",
-                "code": "reconcile.set_description_failed",
-                "detail": "{{error.message}}"
-              }
-            }
-          ]
-        },
-        {
-          "type": "try",
-          "actions": [
-            {
-              "type": "telegram.call",
-              "method": "setMyShortDescription",
-              "payload": {
-                "short_description": "{{runtime.profile.shortDescription}}"
-              }
-            }
-          ],
-          "catch": [
-            {
-              "type": "log.write",
-              "entry": {
-                "level": "warn",
-                "code": "reconcile.set_short_description_failed",
-                "detail": "{{error.message}}"
-              }
-            }
-          ]
-        },
-        {
-          "type": "condition",
-          "if": {
-            "eq": [
-              "{{runtime.syncTelegramCommands}}",
-              true
-            ]
-          },
-          "then": [
-            {
-              "type": "try",
-              "actions": [
-                {
-                  "type": "telegram.call",
-                  "method": "setMyCommands",
-                  "payload": {
-                    "commands": {
-                      "$expr": {
-                        "op": "get",
-                        "path": "runtime.app.menus.commandSets.private"
-                      }
-                    },
-                    "scope": {
-                      "type": "all_private_chats"
-                    }
-                  }
-                }
-              ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "warn",
-                    "code": "reconcile.set_commands_private_failed",
-                    "detail": "{{error.message}}"
-                  }
-                }
-              ]
-            },
-            {
-              "type": "try",
-              "actions": [
-                {
-                  "type": "telegram.call",
-                  "method": "setMyCommands",
-                  "payload": {
-                    "commands": {
-                      "$expr": {
-                        "op": "get",
-                        "path": "runtime.app.menus.commandSets.groupMember"
-                      }
-                    },
-                    "scope": {
-                      "type": "all_group_chats"
-                    }
-                  }
-                }
-              ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "warn",
-                    "code": "reconcile.set_commands_groupMember_failed",
-                    "detail": "{{error.message}}"
-                  }
-                }
-              ]
-            },
-            {
-              "type": "try",
-              "actions": [
-                {
-                  "type": "telegram.call",
-                  "method": "setMyCommands",
-                  "payload": {
-                    "commands": {
-                      "$expr": {
-                        "op": "get",
-                        "path": "runtime.app.menus.commandSets.groupAdmin"
-                      }
-                    },
-                    "scope": {
-                      "type": "all_chat_administrators"
-                    }
-                  }
-                }
-              ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "warn",
-                    "code": "reconcile.set_commands_groupAdmin_failed",
-                    "detail": "{{error.message}}"
-                  }
-                }
-              ]
-            },
-            {
-              "type": "try",
-              "actions": [
-                {
-                  "type": "telegram.call",
-                  "method": "setMyCommands",
-                  "payload": {
-                    "commands": {
-                      "$expr": {
-                        "op": "get",
-                        "path": "runtime.app.menus.commandSets.owner"
-                      }
-                    },
-                    "scope": {
-                      "type": "chat",
-                      "chat_id": "{{owner.id}}"
-                    }
-                  }
-                }
-              ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "warn",
-                    "code": "reconcile.set_commands_owner_failed",
-                    "detail": "{{error.message}}"
-                  }
-                }
-              ]
-            }
-          ],
-          "else": []
-        },
-        {
-          "type": "telegram.call",
-          "method": "setWebhook",
-          "payload": {
-            "url": "{{runtime.webhookUrl}}",
-            "allowed_updates": "{{runtime.allowedUpdates}}",
-            "drop_pending_updates": "{{runtime.dropPendingUpdates}}",
-            "max_connections": "{{runtime.maxWebhookConnections}}"
-          },
-          "as": "webhookSet"
-        },
-        {
-          "type": "telegram.call",
-          "method": "getWebhookInfo",
-          "payload": {},
-          "as": "webhookInfo"
-        },
-        {
-          "type": "state.set",
-          "scope": "global",
-          "key": "system:webhook:lastCheck",
-          "value": {
-            "url": "{{webhookInfo.url}}",
-            "pendingUpdateCount": "{{webhookInfo.pending_update_count}}",
-            "lastCheckAt": "{{runtime.iso}}"
-          }
-        },
-        {
-          "type": "condition",
-          "if": {
-            "eq": [
-              "{{webhookInfo.url}}",
-              "{{runtime.webhookUrl}}"
-            ]
-          },
-          "then": [
-            {
-              "type": "log.write",
-              "entry": {
-                "level": "info",
-                "code": "reconcile.webhook_verified",
-                "detail": "{{webhookInfo.url}}"
-              }
-            }
-          ],
-          "else": [
-            {
-              "type": "log.write",
-              "entry": {
-                "level": "error",
-                "code": "reconcile.webhook_mismatch",
-                "detail": "{{webhookInfo.url}}"
-              }
-            }
-          ]
         }
       ]
     },
     "owner.targets.list": {
       "actions": [
         {
-          "type": "owner.targets.list"
+          "type": "state.list",
+          "scope": "global",
+          "prefix": "registry:{{kind}}:",
+          "limit": 2000,
+          "as": "targetRows"
+        },
+        {
+          "type": "context.set",
+          "path": "targetPageSize",
+          "value": "{{runtime.app.ui.owner.targets.pageSize}}"
+        },
+        {
+          "type": "context.set",
+          "path": "targetPageCount",
+          "value": {
+            "$expr": {
+              "op": "max",
+              "args": [
+                1,
+                {
+                  "$expr": {
+                    "op": "ceil",
+                    "args": [
+                      {
+                        "$expr": {
+                          "op": "divide",
+                          "args": [
+                            "{{targetRows.count}}",
+                            "{{targetPageSize}}"
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "context.set",
+          "path": "targetRequestedPage",
+          "value": {
+            "$expr": {
+              "op": "max",
+              "args": [
+                0,
+                {
+                  "$expr": {
+                    "op": "parseJson",
+                    "args": [
+                      "{{page}}",
+                      0
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "context.set",
+          "path": "targetPage",
+          "value": {
+            "$expr": {
+              "op": "min",
+              "args": [
+                "{{targetRequestedPage}}",
+                {
+                  "$expr": {
+                    "op": "subtract",
+                    "args": [
+                      "{{targetPageCount}}",
+                      1
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "context.set",
+          "path": "targetPageOffset",
+          "value": {
+            "$expr": {
+              "op": "multiply",
+              "args": [
+                "{{targetPage}}",
+                "{{targetPageSize}}"
+              ]
+            }
+          }
+        },
+        {
+          "type": "context.set",
+          "path": "targetPageEnd",
+          "value": {
+            "$expr": {
+              "op": "add",
+              "args": [
+                "{{targetPageOffset}}",
+                "{{targetPageSize}}"
+              ]
+            }
+          }
+        },
+        {
+          "type": "context.set",
+          "path": "targetButtons",
+          "value": []
+        },
+        {
+          "type": "each",
+          "items": {
+            "$expr": {
+              "op": "slice",
+              "args": [
+                "{{targetRows.items}}",
+                "{{targetPageOffset}}",
+                "{{targetPageEnd}}"
+              ]
+            }
+          },
+          "as": "targetRow",
+          "limit": 10,
+          "actions": [
+            {
+              "type": "context.set",
+              "path": "targetId",
+              "value": "{{targetRow.key}}"
+            },
+            {
+              "type": "context.set",
+              "path": "targetTitle",
+              "value": "{{targetRow.key}}"
+            },
+            {
+              "type": "condition",
+              "if": {
+                "exists": "targetRow.value.title"
+              },
+              "then": [
+                {
+                  "type": "context.set",
+                  "path": "targetTitle",
+                  "value": {
+                    "$expr": {
+                      "op": "slice",
+                      "args": [
+                        {
+                          "$expr": {
+                            "op": "replace",
+                            "args": [
+                              {
+                                "$expr": {
+                                  "op": "replace",
+                                  "args": [
+                                    "{{targetRow.value.title}}",
+                                    "\\n",
+                                    " "
+                                  ]
+                                }
+                              },
+                              "\\r",
+                              " "
+                            ]
+                          }
+                        },
+                        0,
+                        40
+                      ]
+                    }
+                  }
+                }
+              ],
+              "else": []
+            },
+            {
+              "type": "condition",
+              "if": {
+                "and": [
+                  {
+                    "not": {
+                      "exists": "targetRow.value.title"
+                    }
+                  },
+                  {
+                    "exists": "targetRow.value.username"
+                  }
+                ]
+              },
+              "then": [
+                {
+                  "type": "context.set",
+                  "path": "targetTitle",
+                  "value": {
+                    "$expr": {
+                      "op": "concat",
+                      "args": [
+                        "@",
+                        {
+                          "$expr": {
+                            "op": "slice",
+                            "args": [
+                              "{{targetRow.value.username}}",
+                              0,
+                              38
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "else": []
+            },
+            {
+              "type": "condition",
+              "if": {
+                "eq": [
+                  "{{targetRow.value.active}}",
+                  false
+                ]
+              },
+              "then": [
+                {
+                  "type": "context.set",
+                  "path": "targetStatusMark",
+                  "value": "{{runtime.app.ui.owner.targets.inactiveMark}}"
+                }
+              ],
+              "else": [
+                {
+                  "type": "context.set",
+                  "path": "targetStatusMark",
+                  "value": "{{runtime.app.ui.owner.targets.activeMark}}"
+                }
+              ]
+            },
+            {
+              "type": "template.render",
+              "template": "{{runtime.app.ui.owner.targets.targetButton}}",
+              "variables": {
+                "id": "{{targetId}}",
+                "title": "{{targetTitle}}",
+                "status": "{{targetStatusMark}}"
+              },
+              "as": "targetButton"
+            },
+            {
+              "type": "context.array.push",
+              "path": "targetButtons",
+              "value": [
+                "{{targetButton}}"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "context.set",
+          "path": "targetNavRow",
+          "value": []
+        },
+        {
+          "type": "context.set",
+          "path": "targetPagePrevious",
+          "value": {
+            "$expr": {
+              "op": "subtract",
+              "args": [
+                "{{targetPage}}",
+                1
+              ]
+            }
+          }
+        },
+        {
+          "type": "condition",
+          "if": {
+            "gt": [
+              "{{targetPage}}",
+              0
+            ]
+          },
+          "then": [
+            {
+              "type": "template.render",
+              "template": "{{runtime.app.ui.owner.targets.previousButton}}",
+              "variables": {
+                "kind": "{{kind}}",
+                "page": "{{targetPagePrevious}}"
+              },
+              "as": "targetPreviousButton"
+            },
+            {
+              "type": "context.array.push",
+              "path": "targetNavRow",
+              "value": "{{targetPreviousButton}}"
+            }
+          ],
+          "else": []
+        },
+        {
+          "type": "context.set",
+          "path": "targetPageNext",
+          "value": {
+            "$expr": {
+              "op": "add",
+              "args": [
+                "{{targetPage}}",
+                1
+              ]
+            }
+          }
+        },
+        {
+          "type": "condition",
+          "if": {
+            "lt": [
+              "{{targetPageNext}}",
+              "{{targetPageCount}}"
+            ]
+          },
+          "then": [
+            {
+              "type": "template.render",
+              "template": "{{runtime.app.ui.owner.targets.nextButton}}",
+              "variables": {
+                "kind": "{{kind}}",
+                "page": "{{targetPageNext}}"
+              },
+              "as": "targetNextButton"
+            },
+            {
+              "type": "context.array.push",
+              "path": "targetNavRow",
+              "value": "{{targetNextButton}}"
+            }
+          ],
+          "else": []
+        },
+        {
+          "type": "condition",
+          "if": {
+            "gt": [
+              {
+                "$expr": {
+                  "op": "length",
+                  "args": [
+                    "{{targetNavRow}}"
+                  ]
+                }
+              },
+              0
+            ]
+          },
+          "then": [
+            {
+              "type": "context.array.push",
+              "path": "targetButtons",
+              "value": "{{targetNavRow}}"
+            }
+          ],
+          "else": []
+        },
+        {
+          "type": "context.set",
+          "path": "targetPageDisplay",
+          "value": {
+            "$expr": {
+              "op": "add",
+              "args": [
+                "{{targetPage}}",
+                1
+              ]
+            }
+          }
+        },
+        {
+          "type": "each",
+          "items": "{{runtime.app.ui.owner.targets.footerButtons}}",
+          "as": "targetFooterRow",
+          "limit": 5,
+          "actions": [
+            {
+              "type": "context.array.push",
+              "path": "targetButtons",
+              "value": "{{targetFooterRow}}"
+            }
+          ]
+        },
+        {
+          "type": "context.set",
+          "path": "targetListTitle",
+          "value": "{{runtime.app.ui.owner.targets.groupsTitle}}"
+        },
+        {
+          "type": "condition",
+          "if": {
+            "eq": [
+              "{{kind}}",
+              "channels"
+            ]
+          },
+          "then": [
+            {
+              "type": "context.set",
+              "path": "targetListTitle",
+              "value": "{{runtime.app.ui.owner.targets.channelsTitle}}"
+            }
+          ],
+          "else": []
+        },
+        {
+          "type": "template.render",
+          "template": "{{runtime.app.ui.owner.targets.text}}",
+          "variables": {
+            "title": "{{targetListTitle}}",
+            "count": "{{targetRows.count}}",
+            "page": "{{targetPageDisplay}}",
+            "pageCount": "{{targetPageCount}}",
+            "kind": "{{kind}}"
+          },
+          "as": "targetListText"
+        },
+        {
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "{{targetListText}}",
+              "parse_mode": "{{runtime.app.ui.style.parseMode}}",
+              "link_preview_options": {
+                "is_disabled": true
+              },
+              "reply_markup": {
+                "inline_keyboard": "{{targetButtons}}"
+              }
+            }
+          }
         }
       ]
     },
@@ -3387,98 +3659,102 @@ export default {
               ]
             },
             {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{callback.message.chat.id}}",
-                "message_id": "{{callback.message.message_id}}",
-                "text": "<b>جزئیات مقصد</b>\n\n<b>نام:</b> {{targetRecord.title}}\n<b>شناسه:</b> <code>{{targetRecord.id}}</code>\n<b>نوع:</b> {{targetTypeText}}\n<b>یوزرنیم:</b> @{{targetRecord.username}}\n<b>عضویت ربات:</b> {{targetRecord.botStatus}}\n<b>وضعیت مقصد:</b> {{targetActiveText}}\n<b>اجازه ارسال:</b> {{targetRecord.canSend}}\n<b>اعضا:</b> {{targetRecord.memberCount}} · <b>مدیران:</b> {{targetRecord.adminCount}}\n<b>ارسال در کانال:</b> {{targetRecord.canPostMessages}}\n<b>محدودسازی اعضا:</b> {{targetRecord.canRestrictMembers}}\n<b>آخرین بررسی:</b> {{targetRecord.lastVerifiedAt}}\n\n<b>پلن:</b> {{quotaInfo.plan}}\n<b>مصرف این ماه:</b> {{quotaInfo.used}}\n<b>سقف ماهانه:</b> {{quotaInfo.limit}}\n<b>باقی‌مانده:</b> {{quotaInfo.remaining}}",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
-                },
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "🟢 FREE",
-                        "callback_data": "ui:target:plan:free:{{targetId}}",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "⭐ PRO",
-                        "callback_data": "ui:target:plan:pro:{{targetId}}",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "♾ نامحدود",
-                        "callback_data": "ui:target:plan:unlimited:{{targetId}}",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "✉️ ارسال پیام اختصاصی",
-                        "callback_data": "ui:target:message:{{targetId}}",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🔍 بررسی مجدد دسترسی",
-                        "callback_data": "ui:target:verify:{{targetId}}",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🔄 تغییر وضعیت ارسال",
-                        "callback_data": "ui:target:toggle:{{targetId}}",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "⬅️ فهرست گروه‌ها",
-                        "callback_data": "ui:owner:groups:0",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "📣 فهرست کانال‌ها",
-                        "callback_data": "ui:owner:channels:0",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🏠 پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
+              "type": "api.call",
+              "api": "telegram.editMessageText",
+              "input": {
+                "payload": {
+                  "chat_id": "{{callback.message.chat.id}}",
+                  "message_id": "{{callback.message.message_id}}",
+                  "text": "<b>جزئیات مقصد</b>\n\n<b>نام:</b> {{targetRecord.title}}\n<b>شناسه:</b> <code>{{targetRecord.id}}</code>\n<b>نوع:</b> {{targetTypeText}}\n<b>یوزرنیم:</b> @{{targetRecord.username}}\n<b>عضویت ربات:</b> {{targetRecord.botStatus}}\n<b>وضعیت مقصد:</b> {{targetActiveText}}\n<b>اجازه ارسال:</b> {{targetRecord.canSend}}\n<b>اعضا:</b> {{targetRecord.memberCount}} · <b>مدیران:</b> {{targetRecord.adminCount}}\n<b>ارسال در کانال:</b> {{targetRecord.canPostMessages}}\n<b>محدودسازی اعضا:</b> {{targetRecord.canRestrictMembers}}\n<b>آخرین بررسی:</b> {{targetRecord.lastVerifiedAt}}\n\n<b>پلن:</b> {{quotaInfo.plan}}\n<b>مصرف این ماه:</b> {{quotaInfo.used}}\n<b>سقف ماهانه:</b> {{quotaInfo.limit}}\n<b>باقی‌مانده:</b> {{quotaInfo.remaining}}",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  },
+                  "reply_markup": {
+                    "inline_keyboard": [
+                      [
+                        {
+                          "text": "🟢 FREE",
+                          "callback_data": "ui:target:plan:free:{{targetId}}",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "⭐ PRO",
+                          "callback_data": "ui:target:plan:pro:{{targetId}}",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "♾ نامحدود",
+                          "callback_data": "ui:target:plan:unlimited:{{targetId}}",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "✉️ ارسال پیام اختصاصی",
+                          "callback_data": "ui:target:message:{{targetId}}",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "🔍 بررسی مجدد دسترسی",
+                          "callback_data": "ui:target:verify:{{targetId}}",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "🔄 تغییر وضعیت ارسال",
+                          "callback_data": "ui:target:toggle:{{targetId}}",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "⬅️ فهرست گروه‌ها",
+                          "callback_data": "ui:owner:groups:0",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "📣 فهرست کانال‌ها",
+                          "callback_data": "ui:owner:channels:0",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "🏠 پنل مدیریت",
+                          "callback_data": "ui:owner:home",
+                          "style": "primary"
+                        }
+                      ]
                     ]
-                  ]
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{callback.message.chat.id}}",
-                "message_id": "{{callback.message.message_id}}",
-                "text": "این مقصد دیگر در فهرست ثبت‌شده وجود ندارد.",
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "⬅️ پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
+              "type": "api.call",
+              "api": "telegram.editMessageText",
+              "input": {
+                "payload": {
+                  "chat_id": "{{callback.message.chat.id}}",
+                  "message_id": "{{callback.message.message_id}}",
+                  "text": "این مقصد دیگر در فهرست ثبت‌شده وجود ندارد.",
+                  "reply_markup": {
+                    "inline_keyboard": [
+                      [
+                        {
+                          "text": "⬅️ پنل مدیریت",
+                          "callback_data": "ui:owner:home",
+                          "style": "primary"
+                        }
+                      ]
                     ]
-                  ]
+                  }
                 }
               }
             }
@@ -3553,22 +3829,26 @@ export default {
               "key": "broadcast.pending"
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "parse_mode": "HTML",
-                "text": "✅ درخواست پیام همگانی ثبت شد.\n\n<b>مقصدهای شناسایی‌شده:</b> {{targets.count}}\n<b>ظرفیت بررسی در این نوبت:</b> حداکثر ۲۰۰۰ مقصد\n\nهر مقصد در یک مرحله جداگانه از نظر فعال‌بودن، مجوز ارسال و سهمیه ماهانه دوباره بررسی می‌شود."
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "parse_mode": "HTML",
+                  "text": "✅ درخواست پیام همگانی ثبت شد.\n\n<b>مقصدهای شناسایی‌شده:</b> {{targets.count}}\n<b>ظرفیت بررسی در این نوبت:</b> حداکثر ۲۰۰۰ مقصد\n\nهر مقصد در یک مرحله جداگانه از نظر فعال‌بودن، مجوز ارسال و سهمیه ماهانه دوباره بررسی می‌شود."
+                }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "پیش‌نمایش معتبری برای ارسال پیدا نشد. دوباره /broadcast را اجرا کن."
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "پیش‌نمایش معتبری برای ارسال پیدا نشد. دوباره /broadcast را اجرا کن."
+                }
               }
             }
           ]
@@ -3597,37 +3877,41 @@ export default {
               "type": "conversation.end"
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "پیش‌نمایش پیام اختصاصی آماده است. ارسال به مقصد انتخاب‌شده را تأیید می‌کنی؟",
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "✅ تأیید ارسال",
-                        "callback_data": "ui:target:send:confirm",
-                        "style": "success"
-                      },
-                      {
-                        "text": "✖️ لغو",
-                        "callback_data": "ui:target:send:cancel",
-                        "style": "danger"
-                      }
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "پیش‌نمایش پیام اختصاصی آماده است. ارسال به مقصد انتخاب‌شده را تأیید می‌کنی؟",
+                  "reply_markup": {
+                    "inline_keyboard": [
+                      [
+                        {
+                          "text": "✅ تأیید ارسال",
+                          "callback_data": "ui:target:send:confirm",
+                          "style": "success"
+                        },
+                        {
+                          "text": "✖️ لغو",
+                          "callback_data": "ui:target:send:cancel",
+                          "style": "danger"
+                        }
+                      ]
                     ]
-                  ]
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "یک پیام یا رسانه معتبر بفرست."
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "یک پیام یا رسانه معتبر بفرست."
+                }
               }
             }
           ]
@@ -3991,7 +4275,6 @@ export default {
                   "type": "state.get",
                   "scope": "chat",
                   "key": "install.source",
-                  "default": null,
                   "as": "installSource"
                 },
                 {
@@ -4011,23 +4294,27 @@ export default {
                       },
                       "then": [
                         {
-                          "type": "telegram.call",
-                          "method": "copyMessage",
-                          "payload": {
-                            "chat_id": "{{chat.id}}",
-                            "from_chat_id": "{{installSource.chat_id}}",
-                            "message_id": "{{installSource.message_id}}"
+                          "type": "api.call",
+                          "api": "telegram.copyMessage",
+                          "input": {
+                            "payload": {
+                              "chat_id": "{{chat.id}}",
+                              "from_chat_id": "{{installSource.chat_id}}",
+                              "message_id": "{{installSource.message_id}}"
+                            }
                           }
                         }
                       ],
                       "else": [
                         {
-                          "type": "telegram.call",
-                          "method": "sendMessage",
-                          "payload": {
-                            "chat_id": "{{chat.id}}",
-                            "text": "{{installText}}",
-                            "parse_mode": "HTML"
+                          "type": "api.call",
+                          "api": "telegram.sendMessage",
+                          "input": {
+                            "payload": {
+                              "chat_id": "{{chat.id}}",
+                              "text": "{{installText}}",
+                              "parse_mode": "HTML"
+                            }
                           }
                         }
                       ]
@@ -4045,14 +4332,6 @@ export default {
                       "scope": "chat",
                       "key": "install.sent",
                       "value": false
-                    },
-                    {
-                      "type": "log.write",
-                      "entry": {
-                        "level": "error",
-                        "code": "registry.install_notice_failed",
-                        "detail": "{{chat.id}}:{{error.message}}"
-                      }
                     }
                   ]
                 }
@@ -4061,59 +4340,26 @@ export default {
             }
           ],
           "else": []
-        },
-        {
-          "type": "log.write",
-          "entry": {
-            "level": "info",
-            "code": "registry.bot_status_updated",
-            "detail": "{{chat.id}}:{{botMemberStatus}}:{{botCanSend}}"
-          }
         }
       ]
     },
     "system.detect.prompt": {
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>شناسایی هوشمند مقصد</b>\n\nیکی از روش‌های زیر را انتخاب کن:\n\n<b>۱.</b> انتخاب مستقیم گروه از فهرست تلگرام\n<b>۲.</b> انتخاب مستقیم کانال از فهرست تلگرام\n<b>۳.</b> ارسال <code>/detect @username</code> یا شناسه عددی\n<b>۴.</b> فوروارد پیام از گروه یا کانال موردنظر\n\nپس از شناسایی، دسترسی ربات، نوع مقصد، تعداد اعضا و مجوز ارسال بررسی می‌شود.",
-            "reply_markup": {
-              "keyboard": [
-                [
-                  {
-                    "text": "👥 انتخاب گروه",
-                    "request_chat": {
-                      "request_id": 88001,
-                      "chat_is_channel": false,
-                      "bot_is_member": true,
-                      "request_title": true,
-                      "request_username": true
-                    },
-                    "style": "primary"
-                  }
-                ],
-                [
-                  {
-                    "text": "📣 انتخاب کانال",
-                    "request_chat": {
-                      "request_id": 88002,
-                      "chat_is_channel": true,
-                      "bot_is_member": true,
-                      "request_title": true,
-                      "request_username": true
-                    },
-                    "style": "primary"
-                  }
-                ]
-              ],
-              "resize_keyboard": true,
-              "one_time_keyboard": true,
-              "input_field_placeholder": "گروه یا کانال را انتخاب کن"
-            },
-            "parse_mode": "HTML"
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>شناسایی هوشمند مقصد</b>\n\nیکی از روش‌های زیر را انتخاب کن:\n\n<b>۱.</b> انتخاب مستقیم گروه از فهرست تلگرام\n<b>۲.</b> انتخاب مستقیم کانال از فهرست تلگرام\n<b>۳.</b> ارسال <code>/detect @username</code> یا شناسه عددی\n<b>۴.</b> فوروارد پیام از گروه یا کانال موردنظر\n\nپس از شناسایی، دسترسی ربات، نوع مقصد، تعداد اعضا و مجوز ارسال بررسی می‌شود.",
+              "reply_markup": {
+                "keyboard": [],
+                "resize_keyboard": true,
+                "one_time_keyboard": true,
+                "input_field_placeholder": "گروه یا کانال را انتخاب کن"
+              },
+              "parse_mode": "HTML"
+            }
           }
         }
       ]
@@ -4199,12 +4445,14 @@ export default {
           "errorAs": "detectError",
           "actions": [
             {
-              "type": "telegram.call",
-              "method": "getChat",
-              "payload": {
-                "chat_id": "{{targetCandidate}}"
-              },
-              "as": "chatInfo"
+              "type": "api.call",
+              "as": "chatInfo",
+              "api": "telegram.getChat",
+              "input": {
+                "payload": {
+                  "chat_id": "{{targetCandidate}}"
+                }
+              }
             },
             {
               "type": "state.get",
@@ -4226,10 +4474,12 @@ export default {
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "getMe",
-                  "payload": {},
-                  "as": "detectedBotInfo"
+                  "type": "api.call",
+                  "as": "detectedBotInfo",
+                  "api": "telegram.getMe",
+                  "input": {
+                    "payload": {}
+                  }
                 },
                 {
                   "type": "context.set",
@@ -4256,25 +4506,18 @@ export default {
               "errorAs": "detectMemberError",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "getChatMember",
-                  "payload": {
-                    "chat_id": "{{chatInfo.id}}",
-                    "user_id": "{{detectedBotId}}"
-                  },
-                  "as": "botMember"
-                }
-              ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "warn",
-                    "code": "detect.membership_unavailable",
-                    "detail": "{{chatInfo.id}}:{{detectMemberError.message}}"
+                  "type": "api.call",
+                  "as": "botMember",
+                  "api": "telegram.getChatMember",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chatInfo.id}}",
+                      "user_id": "{{detectedBotId}}"
+                    }
                   }
                 }
-              ]
+              ],
+              "catch": []
             },
             {
               "type": "context.set",
@@ -4285,24 +4528,17 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "getChatMemberCount",
-                  "payload": {
-                    "chat_id": "{{chatInfo.id}}"
-                  },
-                  "as": "memberCount"
-                }
-              ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "warn",
-                    "code": "detect.member_count_unavailable",
-                    "detail": "{{chatInfo.id}}"
+                  "type": "api.call",
+                  "as": "memberCount",
+                  "api": "telegram.getChatMemberCount",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chatInfo.id}}"
+                    }
                   }
                 }
-              ]
+              ],
+              "catch": []
             },
             {
               "type": "context.set",
@@ -4313,13 +4549,15 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "getChatAdministrators",
-                  "payload": {
-                    "chat_id": "{{chatInfo.id}}",
-                    "return_bots": true
-                  },
-                  "as": "adminList"
+                  "type": "api.call",
+                  "as": "adminList",
+                  "api": "telegram.getChatAdministrators",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chatInfo.id}}",
+                      "return_bots": true
+                    }
+                  }
                 },
                 {
                   "type": "context.set",
@@ -4334,16 +4572,7 @@ export default {
                   }
                 }
               ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "debug",
-                    "code": "detect.admin_list_unavailable",
-                    "detail": "{{chatInfo.id}}"
-                  }
-                }
-              ]
+              "catch": []
             },
             {
               "type": "context.set",
@@ -4577,35 +4806,31 @@ export default {
               "else": []
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>نتیجه شناسایی MUNITOS</b>\n\nنام: {{chatInfo.title}}\nشناسه: {{chatInfo.id}}\nیوزرنیم: @{{chatInfo.username}}\nنوع: {{chatInfo.type}}\nتعداد اعضا: {{memberCount}}\nتعداد مدیران: {{adminCount}}\nوضعیت ربات: {{botMember.status}}\nاجازه ارسال: {{targetCanSend}}\nمقصد مرتبط: {{chatInfo.linked_chat_id}}\n\nشناسه و وضعیت عضویت از Telegram API دریافت شد.",
-                "reply_markup": {
-                  "remove_keyboard": true
-                },
-                "parse_mode": "HTML"
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>نتیجه شناسایی MUNITOS</b>\n\nنام: {{chatInfo.title}}\nشناسه: {{chatInfo.id}}\nیوزرنیم: @{{chatInfo.username}}\nنوع: {{chatInfo.type}}\nتعداد اعضا: {{memberCount}}\nتعداد مدیران: {{adminCount}}\nوضعیت ربات: {{botMember.status}}\nاجازه ارسال: {{targetCanSend}}\nمقصد مرتبط: {{chatInfo.linked_chat_id}}\n\nشناسه و وضعیت عضویت از Telegram API دریافت شد.",
+                  "reply_markup": {
+                    "remove_keyboard": true
+                  },
+                  "parse_mode": "HTML"
+                }
               }
             }
           ],
           "catch": [
             {
-              "type": "log.write",
-              "entry": {
-                "level": "error",
-                "code": "detect.target_failed",
-                "detail": "{{targetCandidate}}:{{detectError.message}}"
-              }
-            },
-            {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "❌ شناسایی کامل نشد. شناسه یا یوزرنیم را بررسی کن و مطمئن شو ربات به مقصد دسترسی دارد. برای کانال، ربات باید عضو کانال باشد؛ برای بررسی مجوز ارسال ممکن است لازم باشد مدیر کانال باشد.",
-                "reply_markup": {
-                  "remove_keyboard": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "❌ شناسایی کامل نشد. شناسه یا یوزرنیم را بررسی کن و مطمئن شو ربات به مقصد دسترسی دارد. برای کانال، ربات باید عضو کانال باشد؛ برای بررسی مجوز ارسال ممکن است لازم باشد مدیر کانال باشد.",
+                  "reply_markup": {
+                    "remove_keyboard": true
+                  }
                 }
               }
             }
@@ -4620,12 +4845,14 @@ export default {
           "errorAs": "verifyError",
           "actions": [
             {
-              "type": "telegram.call",
-              "method": "getChat",
-              "payload": {
-                "chat_id": "{{job.input.targetId}}"
-              },
-              "as": "verifyChat"
+              "type": "api.call",
+              "as": "verifyChat",
+              "api": "telegram.getChat",
+              "input": {
+                "payload": {
+                  "chat_id": "{{job.input.targetId}}"
+                }
+              }
             },
             {
               "type": "state.get",
@@ -4647,10 +4874,12 @@ export default {
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "getMe",
-                  "payload": {},
-                  "as": "verifyBotInfo"
+                  "type": "api.call",
+                  "as": "verifyBotInfo",
+                  "api": "telegram.getMe",
+                  "input": {
+                    "payload": {}
+                  }
                 },
                 {
                   "type": "context.set",
@@ -4666,13 +4895,15 @@ export default {
               ]
             },
             {
-              "type": "telegram.call",
-              "method": "getChatMember",
-              "payload": {
-                "chat_id": "{{verifyChat.id}}",
-                "user_id": "{{verifyBotUserId}}"
-              },
-              "as": "verifyBotMember"
+              "type": "api.call",
+              "as": "verifyBotMember",
+              "api": "telegram.getChatMember",
+              "input": {
+                "payload": {
+                  "chat_id": "{{verifyChat.id}}",
+                  "user_id": "{{verifyBotUserId}}"
+                }
+              }
             },
             {
               "type": "context.set",
@@ -4683,24 +4914,17 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "getChatMemberCount",
-                  "payload": {
-                    "chat_id": "{{verifyChat.id}}"
-                  },
-                  "as": "verifyMemberCount"
-                }
-              ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "warn",
-                    "code": "repair.member_count_failed",
-                    "detail": "{{verifyChat.id}}"
+                  "type": "api.call",
+                  "as": "verifyMemberCount",
+                  "api": "telegram.getChatMemberCount",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{verifyChat.id}}"
+                    }
                   }
                 }
-              ]
+              ],
+              "catch": []
             },
             {
               "type": "context.set",
@@ -4711,13 +4935,15 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "getChatAdministrators",
-                  "payload": {
-                    "chat_id": "{{verifyChat.id}}",
-                    "return_bots": true
-                  },
-                  "as": "verifyAdminList"
+                  "type": "api.call",
+                  "as": "verifyAdminList",
+                  "api": "telegram.getChatAdministrators",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{verifyChat.id}}",
+                      "return_bots": true
+                    }
+                  }
                 },
                 {
                   "type": "context.set",
@@ -4732,16 +4958,7 @@ export default {
                   }
                 }
               ],
-              "catch": [
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "debug",
-                    "code": "repair.admin_list_failed",
-                    "detail": "{{verifyChat.id}}"
-                  }
-                }
-              ]
+              "catch": []
             },
             {
               "type": "context.set",
@@ -4894,7 +5111,7 @@ export default {
                 "canPinMessages": "{{verifyBotMember.can_pin_messages}}",
                 "canManageVideoChats": "{{verifyBotMember.can_manage_video_chats}}",
                 "permissions": "{{verifyBotMember}}",
-                "source": "auto-repair",
+                "source": "verification",
                 "lastVerifiedAt": "{{runtime.iso}}",
                 "updatedAt": "{{runtime.iso}}",
                 "verificationState": "verified"
@@ -4959,14 +5176,6 @@ export default {
                 }
               ],
               "else": []
-            },
-            {
-              "type": "log.write",
-              "entry": {
-                "level": "info",
-                "code": "repair.target_verified",
-                "detail": "{{verifyChat.id}}:{{verifyBotMember.status}}:{{verifyCanSend}}"
-              }
             }
           ],
           "catch": [
@@ -5053,122 +5262,8 @@ export default {
                   ]
                 }
               ]
-            },
-            {
-              "type": "log.write",
-              "entry": {
-                "level": "error",
-                "code": "repair.target_verification_failed",
-                "detail": "{{job.input.targetId}}:{{verifyError.message}}"
-              }
             }
           ]
-        }
-      ]
-    },
-    "system.autorepair": {
-      "actions": [
-        {
-          "type": "runtime.control",
-          "operation": "resume"
-        },
-        {
-          "type": "try",
-          "actions": [
-            {
-              "type": "workflow.run",
-              "workflow": "system.reconcile"
-            }
-          ],
-          "catch": [
-            {
-              "type": "log.write",
-              "entry": {
-                "level": "error",
-                "code": "autorepair.reconcile_failed",
-                "detail": "{{error.message}}"
-              }
-            }
-          ]
-        },
-        {
-          "type": "state.list",
-          "scope": "global",
-          "prefix": "registry:chat:",
-          "limit": 2000,
-          "as": "repairTargets"
-        },
-        {
-          "type": "queue.enqueue",
-          "workflow": "system.autorepair.batch",
-          "input": {
-            "offset": 0
-          },
-          "maxAttempts": 3
-        },
-        {
-          "type": "queue.enqueue",
-          "workflow": "system.autorepair.batch",
-          "input": {
-            "offset": 500
-          },
-          "maxAttempts": 3
-        },
-        {
-          "type": "queue.enqueue",
-          "workflow": "system.autorepair.batch",
-          "input": {
-            "offset": 1000
-          },
-          "maxAttempts": 3
-        },
-        {
-          "type": "queue.enqueue",
-          "workflow": "system.autorepair.batch",
-          "input": {
-            "offset": 1500
-          },
-          "maxAttempts": 3
-        },
-        {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "parse_mode": "HTML",
-            "text": "<b>ترمیم خودکار MUNITOS</b>\n\n✅ پردازش پس‌زمینه فعال شد.\n✅ تنظیمات Telegram و Webhook دوباره اعمال شدند.\n✅ بررسی مقصدهای ثبت‌شده در چهار بستهٔ مستقل به صف بررسی دقیق واگذار شد.\n\n<b>مقصدهای پیدا‌شده:</b> {{repairTargets.count}}\n<b>حداکثر مقصد قابل بررسی در این نوبت:</b> ۲۰۰۰\n\nوضعیت هر مقصد پس از بررسی در فهرست گروه‌ها و کانال‌ها به‌روزرسانی می‌شود.",
-            "reply_markup": {
-              "inline_keyboard": [
-                [
-                  {
-                    "text": "🧾 مشاهده صف",
-                    "callback_data": "ui:owner:queue",
-                    "style": "primary"
-                  },
-                  {
-                    "text": "📊 وضعیت سیستم",
-                    "callback_data": "ui:owner:status",
-                    "style": "primary"
-                  }
-                ],
-                [
-                  {
-                    "text": "🏠 پنل مدیریت",
-                    "callback_data": "ui:owner:home",
-                    "style": "primary"
-                  }
-                ]
-              ]
-            }
-          }
-        },
-        {
-          "type": "log.write",
-          "entry": {
-            "level": "info",
-            "code": "autorepair.started",
-            "detail": "{{repairTargets.count}}"
-          }
         }
       ]
     },
@@ -5248,70 +5343,6 @@ export default {
         }
       ]
     },
-    "system.autorepair.batch": {
-      "actions": [
-        {
-          "type": "state.list",
-          "scope": "global",
-          "prefix": "registry:chat:",
-          "limit": 2000,
-          "as": "batchTargets"
-        },
-        {
-          "type": "context.set",
-          "path": "batchStart",
-          "value": "{{job.input.offset}}"
-        },
-        {
-          "type": "context.set",
-          "path": "batchEnd",
-          "value": {
-            "$expr": {
-              "op": "add",
-              "args": [
-                "{{job.input.offset}}",
-                500
-              ]
-            }
-          }
-        },
-        {
-          "type": "each",
-          "items": {
-            "$expr": {
-              "op": "slice",
-              "args": [
-                "{{batchTargets.items}}",
-                "{{batchStart}}",
-                "{{batchEnd}}"
-              ]
-            }
-          },
-          "as": "batchTarget",
-          "limit": 500,
-          "actions": [
-            {
-              "type": "queue.enqueue",
-              "workflow": "system.verify.target",
-              "input": {
-                "targetId": "{{batchTarget.value.id}}",
-                "depth": 0,
-                "source": "auto-repair"
-              },
-              "maxAttempts": 4
-            }
-          ]
-        },
-        {
-          "type": "log.write",
-          "entry": {
-            "level": "info",
-            "code": "autorepair.batch_queued",
-            "detail": "{{job.input.offset}}:{{batchEnd}}"
-          }
-        }
-      ]
-    },
     "broadcast.prepare.batch": {
       "actions": [
         {
@@ -5365,14 +5396,6 @@ export default {
               "maxAttempts": 3
             }
           ]
-        },
-        {
-          "type": "log.write",
-          "entry": {
-            "level": "info",
-            "code": "broadcast.batch_queued",
-            "detail": "{{job.input.offset}}:{{batchEnd}}"
-          }
         }
       ]
     },
@@ -5382,13 +5405,15 @@ export default {
           "type": "try",
           "actions": [
             {
-              "type": "telegram.call",
-              "method": "getChatMember",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "user_id": "{{user.id}}"
-              },
-              "as": "actorStatus"
+              "type": "api.call",
+              "as": "actorStatus",
+              "api": "telegram.getChatMember",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "user_id": "{{user.id}}"
+                }
+              }
             }
           ],
           "catch": [
@@ -5415,14 +5440,16 @@ export default {
           "then": [],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>این بخش فقط برای مدیران واقعی گروه است.</b>",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>این بخش فقط برای مدیران واقعی گروه است.</b>",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             },
@@ -5439,13 +5466,15 @@ export default {
           "type": "try",
           "actions": [
             {
-              "type": "telegram.call",
-              "method": "getChatMember",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "user_id": "{{user.id}}"
-              },
-              "as": "actorStatus"
+              "type": "api.call",
+              "as": "actorStatus",
+              "api": "telegram.getChatMember",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "user_id": "{{user.id}}"
+                }
+              }
             }
           ],
           "catch": [
@@ -5462,23 +5491,23 @@ export default {
           "type": "state.get",
           "scope": "global",
           "key": "bot:id",
-          "default": null,
           "as": "botId"
         },
         {
           "type": "condition",
           "if": {
             "eq": [
-              "{{botId}}",
-              null
+              "{{botId}}"
             ]
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "getMe",
-              "payload": {},
-              "as": "botInfo"
+              "type": "api.call",
+              "as": "botInfo",
+              "api": "telegram.getMe",
+              "input": {
+                "payload": {}
+              }
             },
             {
               "type": "context.set",
@@ -5492,13 +5521,15 @@ export default {
           "type": "try",
           "actions": [
             {
-              "type": "telegram.call",
-              "method": "getChatMember",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "user_id": "{{botId}}"
-              },
-              "as": "botStatus"
+              "type": "api.call",
+              "as": "botStatus",
+              "api": "telegram.getChatMember",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "user_id": "{{botId}}"
+                }
+              }
             }
           ],
           "catch": [
@@ -5572,14 +5603,16 @@ export default {
           "then": [],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>دسترسی کافی نیست.</b>\nبرای این عملیات، مدیر گروه باید مجوزهای لازم تلگرام را داشته باشد.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>دسترسی کافی نیست.</b>\nبرای این عملیات، مدیر گروه باید مجوزهای لازم تلگرام را داشته باشد.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             },
@@ -5667,13 +5700,15 @@ export default {
                   "type": "try",
                   "actions": [
                     {
-                      "type": "telegram.call",
-                      "method": "getChatMember",
-                      "payload": {
-                        "chat_id": "{{chat.id}}",
-                        "user_id": "{{user.id}}"
-                      },
-                      "as": "forceActor"
+                      "type": "api.call",
+                      "as": "forceActor",
+                      "api": "telegram.getChatMember",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{chat.id}}",
+                          "user_id": "{{user.id}}"
+                        }
+                      }
                     }
                   ],
                   "catch": [
@@ -5783,13 +5818,15 @@ export default {
                   "type": "try",
                   "actions": [
                     {
-                      "type": "telegram.call",
-                      "method": "getChatMember",
-                      "payload": {
-                        "chat_id": "{{joinEntry.value.id}}",
-                        "user_id": "{{user.id}}"
-                      },
-                      "as": "joinMember"
+                      "type": "api.call",
+                      "as": "joinMember",
+                      "api": "telegram.getChatMember",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{joinEntry.value.id}}",
+                          "user_id": "{{user.id}}"
+                        }
+                      }
                     }
                   ],
                   "catch": [
@@ -5884,11 +5921,13 @@ export default {
                       "type": "try",
                       "actions": [
                         {
-                          "type": "telegram.call",
-                          "method": "deleteMessage",
-                          "payload": {
-                            "chat_id": "{{chat.id}}",
-                            "message_id": "{{message.message_id}}"
+                          "type": "api.call",
+                          "api": "telegram.deleteMessage",
+                          "input": {
+                            "payload": {
+                              "chat_id": "{{chat.id}}",
+                              "message_id": "{{message.message_id}}"
+                            }
                           }
                         }
                       ],
@@ -5898,61 +5937,63 @@ export default {
                   "else": []
                 },
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": {
-                      "$expr": {
-                        "op": "concat",
-                        "args": [
-                          "<b>عضویت لازم است</b>\n",
-                          {
-                            "$expr": {
-                              "op": "concat",
-                              "args": [
-                                "<a href=\"tg://user?id=",
-                                "{{user.id}}",
-                                "\">",
-                                {
-                                  "$expr": {
-                                    "op": "replace",
-                                    "args": [
-                                      {
-                                        "$expr": {
-                                          "op": "replace",
-                                          "args": [
-                                            {
-                                              "$expr": {
-                                                "op": "replace",
-                                                "args": [
-                                                  "{{user.first_name}}",
-                                                  "&",
-                                                  "&amp;"
-                                                ]
-                                              }
-                                            },
-                                            "<",
-                                            "&lt;"
-                                          ]
-                                        }
-                                      },
-                                      ">",
-                                      "&gt;"
-                                    ]
-                                  }
-                                },
-                                "</a>"
-                              ]
-                            }
-                          },
-                          "، برای ادامه باید در مقصدهای زیر عضو شوید. پس از عضویت، دکمه بررسی را بزنید."
-                        ]
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": {
+                        "$expr": {
+                          "op": "concat",
+                          "args": [
+                            "<b>عضویت لازم است</b>\n",
+                            {
+                              "$expr": {
+                                "op": "concat",
+                                "args": [
+                                  "<a href=\"tg://user?id=",
+                                  "{{user.id}}",
+                                  "\">",
+                                  {
+                                    "$expr": {
+                                      "op": "replace",
+                                      "args": [
+                                        {
+                                          "$expr": {
+                                            "op": "replace",
+                                            "args": [
+                                              {
+                                                "$expr": {
+                                                  "op": "replace",
+                                                  "args": [
+                                                    "{{user.first_name}}",
+                                                    "&",
+                                                    "&amp;"
+                                                  ]
+                                                }
+                                              },
+                                              "<",
+                                              "&lt;"
+                                            ]
+                                          }
+                                        },
+                                        ">",
+                                        "&gt;"
+                                      ]
+                                    }
+                                  },
+                                  "</a>"
+                                ]
+                              }
+                            },
+                            "، برای ادامه باید در مقصدهای زیر عضو شوید. پس از عضویت، دکمه بررسی را بزنید."
+                          ]
+                        }
+                      },
+                      "parse_mode": "HTML",
+                      "link_preview_options": {
+                        "is_disabled": true
                       }
-                    },
-                    "parse_mode": "HTML",
-                    "link_preview_options": {
-                      "is_disabled": true
                     }
                   }
                 },
@@ -5963,50 +6004,54 @@ export default {
                   "limit": 20,
                   "actions": [
                     {
-                      "type": "telegram.call",
-                      "method": "sendMessage",
-                      "payload": {
-                        "chat_id": "{{chat.id}}",
-                        "text": "<b>برای دسترسی به خدمات، در مقصد زیر عضو شوید:</b>",
-                        "parse_mode": "HTML",
-                        "link_preview_options": {
-                          "is_disabled": true
-                        },
-                        "reply_markup": {
-                          "inline_keyboard": [
-                            [
-                              {
-                                "text": "{{missingEntry.value.title}}",
-                                "url": "{{missingEntry.value.joinUrl}}",
-                                "style": "primary"
-                              }
+                      "type": "api.call",
+                      "api": "telegram.sendMessage",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{chat.id}}",
+                          "text": "<b>برای دسترسی به خدمات، در مقصد زیر عضو شوید:</b>",
+                          "parse_mode": "HTML",
+                          "link_preview_options": {
+                            "is_disabled": true
+                          },
+                          "reply_markup": {
+                            "inline_keyboard": [
+                              [
+                                {
+                                  "text": "{{missingEntry.value.title}}",
+                                  "url": "{{missingEntry.value.joinUrl}}",
+                                  "style": "primary"
+                                }
+                              ]
                             ]
-                          ]
+                          }
                         }
                       }
                     }
                   ]
                 },
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "<b>پس از عضویت، وضعیت خود را بررسی کنید.</b>",
-                    "parse_mode": "HTML",
-                    "link_preview_options": {
-                      "is_disabled": true
-                    },
-                    "reply_markup": {
-                      "inline_keyboard": [
-                        [
-                          {
-                            "text": "✓ بررسی عضویت",
-                            "callback_data": "forcejoin:verify",
-                            "style": "success"
-                          }
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "<b>پس از عضویت، وضعیت خود را بررسی کنید.</b>",
+                      "parse_mode": "HTML",
+                      "link_preview_options": {
+                        "is_disabled": true
+                      },
+                      "reply_markup": {
+                        "inline_keyboard": [
+                          [
+                            {
+                              "text": "✓ بررسی عضویت",
+                              "callback_data": "forcejoin:verify",
+                              "style": "success"
+                            }
+                          ]
                         ]
-                      ]
+                      }
                     }
                   }
                 },
@@ -6025,14 +6070,16 @@ export default {
                   },
                   "then": [
                     {
-                      "type": "telegram.call",
-                      "method": "sendMessage",
-                      "payload": {
-                        "chat_id": "{{chat.id}}",
-                        "text": "<b>عضویت تأیید شد.</b> اکنون می‌توانید از ربات استفاده کنید.",
-                        "parse_mode": "HTML",
-                        "link_preview_options": {
-                          "is_disabled": true
+                      "type": "api.call",
+                      "api": "telegram.sendMessage",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{chat.id}}",
+                          "text": "<b>عضویت تأیید شد.</b> اکنون می‌توانید از ربات استفاده کنید.",
+                          "parse_mode": "HTML",
+                          "link_preview_options": {
+                            "is_disabled": true
+                          }
                         }
                       }
                     }
@@ -6052,23 +6099,23 @@ export default {
           "type": "state.get",
           "scope": "global",
           "key": "bot:id",
-          "default": null,
           "as": "botId"
         },
         {
           "type": "condition",
           "if": {
             "eq": [
-              "{{botId}}",
-              null
+              "{{botId}}"
             ]
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "getMe",
-              "payload": {},
-              "as": "botInfo"
+              "type": "api.call",
+              "as": "botInfo",
+              "api": "telegram.getMe",
+              "input": {
+                "payload": {}
+              }
             },
             {
               "type": "context.set",
@@ -6082,13 +6129,15 @@ export default {
           "type": "try",
           "actions": [
             {
-              "type": "telegram.call",
-              "method": "getChatMember",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "user_id": "{{botId}}"
-              },
-              "as": "localBotStatus"
+              "type": "api.call",
+              "as": "localBotStatus",
+              "api": "telegram.getChatMember",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "user_id": "{{botId}}"
+                }
+              }
             }
           ],
           "catch": [
@@ -6140,28 +6189,32 @@ export default {
               }
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>تنظیم عضویت اجباری گروه</b>\nهر خط یک گروه یا کانال باشد. ربات باید در تمام مقصدها مدیر باشد.\n\nعمومی: <code>@channelname</code>\nخصوصی: <code>-1001234567890 | https://t.me/+invite</code>\n\nبرای اعمال اجباری در همین گروه، ربات باید مجوز حذف پیام اعضا را نیز داشته باشد. ارسال فهرست جدید، فهرست قبلی همین گروه را جایگزین می‌کند.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>تنظیم عضویت اجباری گروه</b>\nهر خط یک گروه یا کانال باشد. ربات باید در تمام مقصدها مدیر باشد.\n\nعمومی: <code>@channelname</code>\nخصوصی: <code>-1001234567890 | https://t.me/+invite</code>\n\nبرای اعمال اجباری در همین گروه، ربات باید مجوز حذف پیام اعضا را نیز داشته باشد. ارسال فهرست جدید، فهرست قبلی همین گروه را جایگزین می‌کند.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>مجوز کافی برای تنظیم وجود ندارد.</b> ربات را در همین گروه مدیر کنید و دسترسی <code>Delete Messages</code> بدهید.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>مجوز کافی برای تنظیم وجود ندارد.</b> ربات را در همین گروه مدیر کنید و دسترسی <code>Delete Messages</code> بدهید.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
@@ -6181,14 +6234,16 @@ export default {
           }
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>تنظیم عضویت اجباری کاربران خصوصی</b>\nهر خط یک کانال یا گروه باشد. ربات باید در تمام مقصدها مدیر باشد.\n\nعمومی: <code>@channelname</code>\nخصوصی: <code>-1001234567890 | https://t.me/+invite</code>\n\nفهرست جدید پس از تأیید، جایگزین فهرست قبلی می‌شود.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>تنظیم عضویت اجباری کاربران خصوصی</b>\nهر خط یک کانال یا گروه باشد. ربات باید در تمام مقصدها مدیر باشد.\n\nعمومی: <code>@channelname</code>\nخصوصی: <code>-1001234567890 | https://t.me/+invite</code>\n\nفهرست جدید پس از تأیید، جایگزین فهرست قبلی می‌شود.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -6264,12 +6319,14 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "getChat",
-                  "payload": {
-                    "chat_id": "{{targetRef}}"
-                  },
-                  "as": "checkedTarget"
+                  "type": "api.call",
+                  "as": "checkedTarget",
+                  "api": "telegram.getChat",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{targetRef}}"
+                    }
+                  }
                 },
                 {
                   "type": "condition",
@@ -6288,23 +6345,23 @@ export default {
                       "type": "state.get",
                       "scope": "global",
                       "key": "bot:id",
-                      "default": null,
                       "as": "botId"
                     },
                     {
                       "type": "condition",
                       "if": {
                         "eq": [
-                          "{{botId}}",
-                          null
+                          "{{botId}}"
                         ]
                       },
                       "then": [
                         {
-                          "type": "telegram.call",
-                          "method": "getMe",
-                          "payload": {},
-                          "as": "botInfo"
+                          "type": "api.call",
+                          "as": "botInfo",
+                          "api": "telegram.getMe",
+                          "input": {
+                            "payload": {}
+                          }
                         },
                         {
                           "type": "context.set",
@@ -6315,13 +6372,15 @@ export default {
                       "else": []
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "getChatMember",
-                      "payload": {
-                        "chat_id": "{{checkedTarget.id}}",
-                        "user_id": "{{botId}}"
-                      },
-                      "as": "targetBotStatus"
+                      "type": "api.call",
+                      "as": "targetBotStatus",
+                      "api": "telegram.getChatMember",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{checkedTarget.id}}",
+                          "user_id": "{{botId}}"
+                        }
+                      }
                     },
                     {
                       "type": "condition",
@@ -6384,13 +6443,15 @@ export default {
                                   "type": "try",
                                   "actions": [
                                     {
-                                      "type": "telegram.call",
-                                      "method": "createChatInviteLink",
-                                      "payload": {
-                                        "chat_id": "{{checkedTarget.id}}",
-                                        "name": "MUNITOS required join"
-                                      },
-                                      "as": "generatedInvite"
+                                      "type": "api.call",
+                                      "as": "generatedInvite",
+                                      "api": "telegram.createChatInviteLink",
+                                      "input": {
+                                        "payload": {
+                                          "chat_id": "{{checkedTarget.id}}",
+                                          "name": "MUNITOS required join"
+                                        }
+                                      }
                                     },
                                     {
                                       "type": "context.set",
@@ -6533,14 +6594,6 @@ export default {
                         1
                       ]
                     }
-                  }
-                },
-                {
-                  "type": "log.write",
-                  "entry": {
-                    "level": "warn",
-                    "code": "forcejoin.target_verification_failed",
-                    "detail": "{{line}}:{{error.message}}"
                   }
                 }
               ]
@@ -6797,25 +6850,27 @@ export default {
           "type": "conversation.end"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": {
-              "$expr": {
-                "op": "concat",
-                "args": [
-                  "<b>بررسی فهرست عضویت اجباری پایان یافت.</b>\nتأییدشده: <b>",
-                  "{{forceJoinAccepted}}",
-                  "</b>\nردشده: <b>",
-                  "{{forceJoinRejected}}",
-                  "</b>\nفهرست قبلی فقط وقتی جایگزین می‌شود که حداقل یک مقصد معتبر ثبت شده باشد."
-                ]
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": {
+                "$expr": {
+                  "op": "concat",
+                  "args": [
+                    "<b>بررسی فهرست عضویت اجباری پایان یافت.</b>\nتأییدشده: <b>",
+                    "{{forceJoinAccepted}}",
+                    "</b>\nردشده: <b>",
+                    "{{forceJoinRejected}}",
+                    "</b>\nفهرست قبلی فقط وقتی جایگزین می‌شود که حداقل یک مقصد معتبر ثبت شده باشد."
+                  ]
+                }
+              },
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
               }
-            },
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
             }
           }
         }
@@ -6850,14 +6905,16 @@ export default {
           "value": false
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>عضویت اجباری این گروه غیرفعال و فهرست آن پاک شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>عضویت اجباری این گروه غیرفعال و فهرست آن پاک شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -6892,14 +6949,16 @@ export default {
           "value": false
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>عضویت اجباری کاربران خصوصی غیرفعال و فهرست آن پاک شد.</b>",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>عضویت اجباری کاربران خصوصی غیرفعال و فهرست آن پاک شد.</b>",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -6933,14 +6992,16 @@ export default {
               "key": "{{templateKind}}.text"
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>پیام و رسانه ذخیره شد.</b> محتوای اصلی همراه قالب‌بندی آن کپی خواهد شد.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>پیام و رسانه ذخیره شد.</b> محتوای اصلی همراه قالب‌بندی آن کپی خواهد شد.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
@@ -6967,14 +7028,16 @@ export default {
                   "key": "{{templateKind}}.source"
                 },
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "<b>متن ذخیره شد.</b> برای قالب HTML می‌توانید از تگ‌های مجاز تلگرام استفاده کنید.",
-                    "parse_mode": "HTML",
-                    "link_preview_options": {
-                      "is_disabled": true
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "<b>متن ذخیره شد.</b> برای قالب HTML می‌توانید از تگ‌های مجاز تلگرام استفاده کنید.",
+                      "parse_mode": "HTML",
+                      "link_preview_options": {
+                        "is_disabled": true
+                      }
                     }
                   }
                 }
@@ -6989,14 +7052,16 @@ export default {
                   }
                 },
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "<b>محتوای پیام را در پیام بعدی بفرستید.</b> متن، عکس، ویدئو، فایل یا رسانه همراه کپشن پذیرفته می‌شود؛ ساختار اصلی پیام حفظ خواهد شد. برای لغو /cancel را بفرستید.",
-                    "parse_mode": "HTML",
-                    "link_preview_options": {
-                      "is_disabled": true
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "<b>محتوای پیام را در پیام بعدی بفرستید.</b> متن، عکس، ویدئو، فایل یا رسانه همراه کپشن پذیرفته می‌شود؛ ساختار اصلی پیام حفظ خواهد شد. برای لغو /cancel را بفرستید.",
+                      "parse_mode": "HTML",
+                      "link_preview_options": {
+                        "is_disabled": true
+                      }
                     }
                   }
                 }
@@ -7032,28 +7097,32 @@ export default {
               "type": "conversation.end"
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>محتوای پیام ذخیره شد.</b> رسانه و قالب‌بندی اصلی حفظ می‌شوند.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>محتوای پیام ذخیره شد.</b> رسانه و قالب‌بندی اصلی حفظ می‌شوند.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>پیام متنی یا رسانه‌ای دریافت نشد.</b> دوباره محتوا را ارسال کنید.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>پیام متنی یا رسانه‌ای دریافت نشد.</b> دوباره محتوا را ارسال کنید.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             }
@@ -7074,14 +7143,16 @@ export default {
           "key": "{{templateKind}}.source"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>تنظیم پیام بازنشانی شد.</b> مقدار پیش‌فرض دیتابیس استفاده می‌شود.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>تنظیم پیام بازنشانی شد.</b> مقدار پیش‌فرض دیتابیس استفاده می‌شود.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -7157,12 +7228,14 @@ export default {
           "type": "try",
           "actions": [
             {
-              "type": "telegram.call",
-              "method": "getChat",
-              "payload": {
-                "chat_id": "{{chat.id}}"
-              },
-              "as": "chatInfo"
+              "type": "api.call",
+              "as": "chatInfo",
+              "api": "telegram.getChat",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}"
+                }
+              }
             },
             {
               "type": "context.set",
@@ -7192,7 +7265,6 @@ export default {
               "type": "state.get",
               "scope": "chat",
               "key": "welcome.source",
-              "default": null,
               "as": "welcomeSource"
             },
             {
@@ -7209,180 +7281,184 @@ export default {
               },
               "then": [
                 {
-                  "type": "telegram.call",
-                  "method": "copyMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "from_chat_id": "{{welcomeSource.chat_id}}",
-                    "message_id": "{{welcomeSource.message_id}}"
+                  "type": "api.call",
+                  "api": "telegram.copyMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "from_chat_id": "{{welcomeSource.chat_id}}",
+                      "message_id": "{{welcomeSource.message_id}}"
+                    }
                   }
                 }
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": {
-                      "$expr": {
-                        "op": "replace",
-                        "args": [
-                          {
-                            "$expr": {
-                              "op": "replace",
-                              "args": [
-                                {
-                                  "$expr": {
-                                    "op": "replace",
-                                    "args": [
-                                      {
-                                        "$expr": {
-                                          "op": "replace",
-                                          "args": [
-                                            {
-                                              "$expr": {
-                                                "op": "replace",
-                                                "args": [
-                                                  {
-                                                    "$expr": {
-                                                      "op": "replace",
-                                                      "args": [
-                                                        {
-                                                          "$expr": {
-                                                            "op": "replace",
-                                                            "args": [
-                                                              {
-                                                                "$expr": {
-                                                                  "op": "replace",
-                                                                  "args": [
-                                                                    {
-                                                                      "$expr": {
-                                                                        "op": "replace",
-                                                                        "args": [
-                                                                          {
-                                                                            "$expr": {
-                                                                              "op": "replace",
-                                                                              "args": [
-                                                                                {
-                                                                                  "$expr": {
-                                                                                    "op": "replace",
-                                                                                    "args": [
-                                                                                      "{{templateText}}",
-                                                                                      "!mention",
-                                                                                      {
-                                                                                        "$expr": {
-                                                                                          "op": "concat",
-                                                                                          "args": [
-                                                                                            "<a href=\"tg://user?id=",
-                                                                                            "{{member.id}}",
-                                                                                            "\">",
-                                                                                            {
-                                                                                              "$expr": {
-                                                                                                "op": "replace",
-                                                                                                "args": [
-                                                                                                  {
-                                                                                                    "$expr": {
-                                                                                                      "op": "replace",
-                                                                                                      "args": [
-                                                                                                        {
-                                                                                                          "$expr": {
-                                                                                                            "op": "replace",
-                                                                                                            "args": [
-                                                                                                              "{{member.first_name}}",
-                                                                                                              "&",
-                                                                                                              "&amp;"
-                                                                                                            ]
-                                                                                                          }
-                                                                                                        },
-                                                                                                        "<",
-                                                                                                        "&lt;"
-                                                                                                      ]
-                                                                                                    }
-                                                                                                  },
-                                                                                                  ">",
-                                                                                                  "&gt;"
-                                                                                                ]
-                                                                                              }
-                                                                                            },
-                                                                                            "</a>"
-                                                                                          ]
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": {
+                        "$expr": {
+                          "op": "replace",
+                          "args": [
+                            {
+                              "$expr": {
+                                "op": "replace",
+                                "args": [
+                                  {
+                                    "$expr": {
+                                      "op": "replace",
+                                      "args": [
+                                        {
+                                          "$expr": {
+                                            "op": "replace",
+                                            "args": [
+                                              {
+                                                "$expr": {
+                                                  "op": "replace",
+                                                  "args": [
+                                                    {
+                                                      "$expr": {
+                                                        "op": "replace",
+                                                        "args": [
+                                                          {
+                                                            "$expr": {
+                                                              "op": "replace",
+                                                              "args": [
+                                                                {
+                                                                  "$expr": {
+                                                                    "op": "replace",
+                                                                    "args": [
+                                                                      {
+                                                                        "$expr": {
+                                                                          "op": "replace",
+                                                                          "args": [
+                                                                            {
+                                                                              "$expr": {
+                                                                                "op": "replace",
+                                                                                "args": [
+                                                                                  {
+                                                                                    "$expr": {
+                                                                                      "op": "replace",
+                                                                                      "args": [
+                                                                                        "{{templateText}}",
+                                                                                        "!mention",
+                                                                                        {
+                                                                                          "$expr": {
+                                                                                            "op": "concat",
+                                                                                            "args": [
+                                                                                              "<a href=\"tg://user?id=",
+                                                                                              "{{member.id}}",
+                                                                                              "\">",
+                                                                                              {
+                                                                                                "$expr": {
+                                                                                                  "op": "replace",
+                                                                                                  "args": [
+                                                                                                    {
+                                                                                                      "$expr": {
+                                                                                                        "op": "replace",
+                                                                                                        "args": [
+                                                                                                          {
+                                                                                                            "$expr": {
+                                                                                                              "op": "replace",
+                                                                                                              "args": [
+                                                                                                                "{{member.first_name}}",
+                                                                                                                "&",
+                                                                                                                "&amp;"
+                                                                                                              ]
+                                                                                                            }
+                                                                                                          },
+                                                                                                          "<",
+                                                                                                          "&lt;"
+                                                                                                        ]
+                                                                                                      }
+                                                                                                    },
+                                                                                                    ">",
+                                                                                                    "&gt;"
+                                                                                                  ]
+                                                                                                }
+                                                                                              },
+                                                                                              "</a>"
+                                                                                            ]
+                                                                                          }
                                                                                         }
-                                                                                      }
-                                                                                    ]
-                                                                                  }
-                                                                                },
-                                                                                "!firstname",
-                                                                                "{{member.first_name}}"
-                                                                              ]
-                                                                            }
-                                                                          },
-                                                                          "!lastname",
-                                                                          "{{member.last_name}}"
-                                                                        ]
-                                                                      }
-                                                                    },
-                                                                    "!username",
-                                                                    "{{memberUsername}}"
-                                                                  ]
-                                                                }
-                                                              },
-                                                              "!userid",
-                                                              "{{member.id}}"
-                                                            ]
-                                                          }
-                                                        },
-                                                        "!groupname",
-                                                        "{{chat.title}}"
-                                                      ]
-                                                    }
-                                                  },
-                                                  "!grouplink",
-                                                  "{{groupInviteLink}}"
-                                                ]
-                                              }
-                                            },
-                                            "!grouprules",
-                                            "{{groupRules}}"
-                                          ]
+                                                                                      ]
+                                                                                    }
+                                                                                  },
+                                                                                  "!firstname",
+                                                                                  "{{member.first_name}}"
+                                                                                ]
+                                                                              }
+                                                                            },
+                                                                            "!lastname",
+                                                                            "{{member.last_name}}"
+                                                                          ]
+                                                                        }
+                                                                      },
+                                                                      "!username",
+                                                                      "{{memberUsername}}"
+                                                                    ]
+                                                                  }
+                                                                },
+                                                                "!userid",
+                                                                "{{member.id}}"
+                                                              ]
+                                                            }
+                                                          },
+                                                          "!groupname",
+                                                          "{{chat.title}}"
+                                                        ]
+                                                      }
+                                                    },
+                                                    "!grouplink",
+                                                    "{{groupInviteLink}}"
+                                                  ]
+                                                }
+                                              },
+                                              "!grouprules",
+                                              "{{groupRules}}"
+                                            ]
+                                          }
+                                        },
+                                        "!date",
+                                        {
+                                          "$expr": {
+                                            "op": "slice",
+                                            "args": [
+                                              "{{runtime.iso}}",
+                                              0,
+                                              10
+                                            ]
+                                          }
                                         }
-                                      },
-                                      "!date",
-                                      {
-                                        "$expr": {
-                                          "op": "slice",
-                                          "args": [
-                                            "{{runtime.iso}}",
-                                            0,
-                                            10
-                                          ]
-                                        }
-                                      }
-                                    ]
+                                      ]
+                                    }
+                                  },
+                                  "!time",
+                                  {
+                                    "$expr": {
+                                      "op": "slice",
+                                      "args": [
+                                        "{{runtime.iso}}",
+                                        11,
+                                        19
+                                      ]
+                                    }
                                   }
-                                },
-                                "!time",
-                                {
-                                  "$expr": {
-                                    "op": "slice",
-                                    "args": [
-                                      "{{runtime.iso}}",
-                                      11,
-                                      19
-                                    ]
-                                  }
-                                }
-                              ]
-                            }
-                          },
-                          "!emoji",
-                          "✨"
-                        ]
+                                ]
+                              }
+                            },
+                            "!emoji",
+                            "✨"
+                          ]
+                        }
+                      },
+                      "parse_mode": "HTML",
+                      "link_preview_options": {
+                        "is_disabled": true
                       }
-                    },
-                    "parse_mode": "HTML",
-                    "link_preview_options": {
-                      "is_disabled": true
                     }
                   }
                 }
@@ -7455,12 +7531,14 @@ export default {
           "type": "try",
           "actions": [
             {
-              "type": "telegram.call",
-              "method": "getChat",
-              "payload": {
-                "chat_id": "{{chat.id}}"
-              },
-              "as": "chatInfo"
+              "type": "api.call",
+              "as": "chatInfo",
+              "api": "telegram.getChat",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}"
+                }
+              }
             },
             {
               "type": "context.set",
@@ -7483,7 +7561,6 @@ export default {
               "type": "state.get",
               "scope": "chat",
               "key": "goodbye.source",
-              "default": null,
               "as": "goodbyeSource"
             },
             {
@@ -7500,180 +7577,184 @@ export default {
               },
               "then": [
                 {
-                  "type": "telegram.call",
-                  "method": "copyMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "from_chat_id": "{{goodbyeSource.chat_id}}",
-                    "message_id": "{{goodbyeSource.message_id}}"
+                  "type": "api.call",
+                  "api": "telegram.copyMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "from_chat_id": "{{goodbyeSource.chat_id}}",
+                      "message_id": "{{goodbyeSource.message_id}}"
+                    }
                   }
                 }
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": {
-                      "$expr": {
-                        "op": "replace",
-                        "args": [
-                          {
-                            "$expr": {
-                              "op": "replace",
-                              "args": [
-                                {
-                                  "$expr": {
-                                    "op": "replace",
-                                    "args": [
-                                      {
-                                        "$expr": {
-                                          "op": "replace",
-                                          "args": [
-                                            {
-                                              "$expr": {
-                                                "op": "replace",
-                                                "args": [
-                                                  {
-                                                    "$expr": {
-                                                      "op": "replace",
-                                                      "args": [
-                                                        {
-                                                          "$expr": {
-                                                            "op": "replace",
-                                                            "args": [
-                                                              {
-                                                                "$expr": {
-                                                                  "op": "replace",
-                                                                  "args": [
-                                                                    {
-                                                                      "$expr": {
-                                                                        "op": "replace",
-                                                                        "args": [
-                                                                          {
-                                                                            "$expr": {
-                                                                              "op": "replace",
-                                                                              "args": [
-                                                                                {
-                                                                                  "$expr": {
-                                                                                    "op": "replace",
-                                                                                    "args": [
-                                                                                      "{{templateText}}",
-                                                                                      "!mention",
-                                                                                      {
-                                                                                        "$expr": {
-                                                                                          "op": "concat",
-                                                                                          "args": [
-                                                                                            "<a href=\"tg://user?id=",
-                                                                                            "{{leftMember.id}}",
-                                                                                            "\">",
-                                                                                            {
-                                                                                              "$expr": {
-                                                                                                "op": "replace",
-                                                                                                "args": [
-                                                                                                  {
-                                                                                                    "$expr": {
-                                                                                                      "op": "replace",
-                                                                                                      "args": [
-                                                                                                        {
-                                                                                                          "$expr": {
-                                                                                                            "op": "replace",
-                                                                                                            "args": [
-                                                                                                              "{{leftMember.first_name}}",
-                                                                                                              "&",
-                                                                                                              "&amp;"
-                                                                                                            ]
-                                                                                                          }
-                                                                                                        },
-                                                                                                        "<",
-                                                                                                        "&lt;"
-                                                                                                      ]
-                                                                                                    }
-                                                                                                  },
-                                                                                                  ">",
-                                                                                                  "&gt;"
-                                                                                                ]
-                                                                                              }
-                                                                                            },
-                                                                                            "</a>"
-                                                                                          ]
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": {
+                        "$expr": {
+                          "op": "replace",
+                          "args": [
+                            {
+                              "$expr": {
+                                "op": "replace",
+                                "args": [
+                                  {
+                                    "$expr": {
+                                      "op": "replace",
+                                      "args": [
+                                        {
+                                          "$expr": {
+                                            "op": "replace",
+                                            "args": [
+                                              {
+                                                "$expr": {
+                                                  "op": "replace",
+                                                  "args": [
+                                                    {
+                                                      "$expr": {
+                                                        "op": "replace",
+                                                        "args": [
+                                                          {
+                                                            "$expr": {
+                                                              "op": "replace",
+                                                              "args": [
+                                                                {
+                                                                  "$expr": {
+                                                                    "op": "replace",
+                                                                    "args": [
+                                                                      {
+                                                                        "$expr": {
+                                                                          "op": "replace",
+                                                                          "args": [
+                                                                            {
+                                                                              "$expr": {
+                                                                                "op": "replace",
+                                                                                "args": [
+                                                                                  {
+                                                                                    "$expr": {
+                                                                                      "op": "replace",
+                                                                                      "args": [
+                                                                                        "{{templateText}}",
+                                                                                        "!mention",
+                                                                                        {
+                                                                                          "$expr": {
+                                                                                            "op": "concat",
+                                                                                            "args": [
+                                                                                              "<a href=\"tg://user?id=",
+                                                                                              "{{leftMember.id}}",
+                                                                                              "\">",
+                                                                                              {
+                                                                                                "$expr": {
+                                                                                                  "op": "replace",
+                                                                                                  "args": [
+                                                                                                    {
+                                                                                                      "$expr": {
+                                                                                                        "op": "replace",
+                                                                                                        "args": [
+                                                                                                          {
+                                                                                                            "$expr": {
+                                                                                                              "op": "replace",
+                                                                                                              "args": [
+                                                                                                                "{{leftMember.first_name}}",
+                                                                                                                "&",
+                                                                                                                "&amp;"
+                                                                                                              ]
+                                                                                                            }
+                                                                                                          },
+                                                                                                          "<",
+                                                                                                          "&lt;"
+                                                                                                        ]
+                                                                                                      }
+                                                                                                    },
+                                                                                                    ">",
+                                                                                                    "&gt;"
+                                                                                                  ]
+                                                                                                }
+                                                                                              },
+                                                                                              "</a>"
+                                                                                            ]
+                                                                                          }
                                                                                         }
-                                                                                      }
-                                                                                    ]
-                                                                                  }
-                                                                                },
-                                                                                "!firstname",
-                                                                                "{{leftMember.first_name}}"
-                                                                              ]
-                                                                            }
-                                                                          },
-                                                                          "!lastname",
-                                                                          "{{leftMember.last_name}}"
-                                                                        ]
-                                                                      }
-                                                                    },
-                                                                    "!username",
-                                                                    "{{memberUsername}}"
-                                                                  ]
-                                                                }
-                                                              },
-                                                              "!userid",
-                                                              "{{leftMember.id}}"
-                                                            ]
-                                                          }
-                                                        },
-                                                        "!groupname",
-                                                        "{{chat.title}}"
-                                                      ]
-                                                    }
-                                                  },
-                                                  "!grouplink",
-                                                  "{{groupInviteLink}}"
-                                                ]
-                                              }
-                                            },
-                                            "!grouprules",
-                                            "{{groupRules}}"
-                                          ]
+                                                                                      ]
+                                                                                    }
+                                                                                  },
+                                                                                  "!firstname",
+                                                                                  "{{leftMember.first_name}}"
+                                                                                ]
+                                                                              }
+                                                                            },
+                                                                            "!lastname",
+                                                                            "{{leftMember.last_name}}"
+                                                                          ]
+                                                                        }
+                                                                      },
+                                                                      "!username",
+                                                                      "{{memberUsername}}"
+                                                                    ]
+                                                                  }
+                                                                },
+                                                                "!userid",
+                                                                "{{leftMember.id}}"
+                                                              ]
+                                                            }
+                                                          },
+                                                          "!groupname",
+                                                          "{{chat.title}}"
+                                                        ]
+                                                      }
+                                                    },
+                                                    "!grouplink",
+                                                    "{{groupInviteLink}}"
+                                                  ]
+                                                }
+                                              },
+                                              "!grouprules",
+                                              "{{groupRules}}"
+                                            ]
+                                          }
+                                        },
+                                        "!date",
+                                        {
+                                          "$expr": {
+                                            "op": "slice",
+                                            "args": [
+                                              "{{runtime.iso}}",
+                                              0,
+                                              10
+                                            ]
+                                          }
                                         }
-                                      },
-                                      "!date",
-                                      {
-                                        "$expr": {
-                                          "op": "slice",
-                                          "args": [
-                                            "{{runtime.iso}}",
-                                            0,
-                                            10
-                                          ]
-                                        }
-                                      }
-                                    ]
+                                      ]
+                                    }
+                                  },
+                                  "!time",
+                                  {
+                                    "$expr": {
+                                      "op": "slice",
+                                      "args": [
+                                        "{{runtime.iso}}",
+                                        11,
+                                        19
+                                      ]
+                                    }
                                   }
-                                },
-                                "!time",
-                                {
-                                  "$expr": {
-                                    "op": "slice",
-                                    "args": [
-                                      "{{runtime.iso}}",
-                                      11,
-                                      19
-                                    ]
-                                  }
-                                }
-                              ]
-                            }
-                          },
-                          "!emoji",
-                          "✨"
-                        ]
+                                ]
+                              }
+                            },
+                            "!emoji",
+                            "✨"
+                          ]
+                        }
+                      },
+                      "parse_mode": "HTML",
+                      "link_preview_options": {
+                        "is_disabled": true
                       }
-                    },
-                    "parse_mode": "HTML",
-                    "link_preview_options": {
-                      "is_disabled": true
                     }
                   }
                 }
@@ -7688,8 +7769,7 @@ export default {
       "actions": [
         {
           "type": "context.set",
-          "path": "targetId",
-          "value": null
+          "path": "targetId"
         },
         {
           "type": "condition",
@@ -7838,20 +7918,21 @@ export default {
           "type": "condition",
           "if": {
             "eq": [
-              "{{targetId}}",
-              null
+              "{{targetId}}"
             ]
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>کاربر مشخص نشد.</b> روی پیام او ریپلای کنید یا شناسه عددی/یوزرنیم شناخته‌شده را وارد کنید.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>کاربر مشخص نشد.</b> روی پیام او ریپلای کنید یا شناسه عددی/یوزرنیم شناخته‌شده را وارد کنید.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  }
                 }
               }
             },
@@ -7894,17 +7975,19 @@ export default {
               },
               "then": [
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "{{runtime.app.ui.home.owner.text}}",
-                    "parse_mode": "HTML",
-                    "reply_markup": {
-                      "inline_keyboard": {
-                        "$expr": {
-                          "op": "get",
-                          "path": "runtime.app.ui.home.owner.keyboard"
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "{{runtime.app.ui.home.owner.text}}",
+                      "parse_mode": "HTML",
+                      "reply_markup": {
+                        "inline_keyboard": {
+                          "$expr": {
+                            "op": "get",
+                            "path": "runtime.app.ui.home.owner.keyboard"
+                          }
                         }
                       }
                     }
@@ -7913,17 +7996,19 @@ export default {
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "{{runtime.app.ui.home.privateUser.text}}",
-                    "parse_mode": "HTML",
-                    "reply_markup": {
-                      "inline_keyboard": {
-                        "$expr": {
-                          "op": "get",
-                          "path": "runtime.app.ui.home.privateUser.keyboard"
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "{{runtime.app.ui.home.privateUser.text}}",
+                      "parse_mode": "HTML",
+                      "reply_markup": {
+                        "inline_keyboard": {
+                          "$expr": {
+                            "op": "get",
+                            "path": "runtime.app.ui.home.privateUser.keyboard"
+                          }
                         }
                       }
                     }
@@ -7937,13 +8022,15 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "getChatMember",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "user_id": "{{user.id}}"
-                  },
-                  "as": "actorStatus"
+                  "type": "api.call",
+                  "as": "actorStatus",
+                  "api": "telegram.getChatMember",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "user_id": "{{user.id}}"
+                    }
+                  }
                 }
               ],
               "catch": [
@@ -7969,17 +8056,19 @@ export default {
               },
               "then": [
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "{{runtime.app.ui.home.groupAdmin.text}}",
-                    "parse_mode": "HTML",
-                    "reply_markup": {
-                      "inline_keyboard": {
-                        "$expr": {
-                          "op": "get",
-                          "path": "runtime.app.ui.home.groupAdmin.keyboard"
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "{{runtime.app.ui.home.groupAdmin.text}}",
+                      "parse_mode": "HTML",
+                      "reply_markup": {
+                        "inline_keyboard": {
+                          "$expr": {
+                            "op": "get",
+                            "path": "runtime.app.ui.home.groupAdmin.keyboard"
+                          }
                         }
                       }
                     }
@@ -7988,17 +8077,19 @@ export default {
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "{{runtime.app.ui.home.groupMember.text}}",
-                    "parse_mode": "HTML",
-                    "reply_markup": {
-                      "inline_keyboard": {
-                        "$expr": {
-                          "op": "get",
-                          "path": "runtime.app.ui.home.groupMember.keyboard"
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "{{runtime.app.ui.home.groupMember.text}}",
+                      "parse_mode": "HTML",
+                      "reply_markup": {
+                        "inline_keyboard": {
+                          "$expr": {
+                            "op": "get",
+                            "path": "runtime.app.ui.home.groupMember.keyboard"
+                          }
                         }
                       }
                     }
@@ -8036,17 +8127,19 @@ export default {
               },
               "then": [
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "{{runtime.app.ui.help.text}}",
-                    "parse_mode": "HTML",
-                    "reply_markup": {
-                      "inline_keyboard": {
-                        "$expr": {
-                          "op": "get",
-                          "path": "runtime.app.ui.help.ownerKeyboard"
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "{{runtime.app.ui.help.text}}",
+                      "parse_mode": "HTML",
+                      "reply_markup": {
+                        "inline_keyboard": {
+                          "$expr": {
+                            "op": "get",
+                            "path": "runtime.app.ui.help.ownerKeyboard"
+                          }
                         }
                       }
                     }
@@ -8055,17 +8148,19 @@ export default {
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "{{runtime.app.ui.help.private.text}}",
-                    "parse_mode": "HTML",
-                    "reply_markup": {
-                      "inline_keyboard": {
-                        "$expr": {
-                          "op": "get",
-                          "path": "runtime.app.ui.help.private.keyboard"
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "{{runtime.app.ui.help.private.text}}",
+                      "parse_mode": "HTML",
+                      "reply_markup": {
+                        "inline_keyboard": {
+                          "$expr": {
+                            "op": "get",
+                            "path": "runtime.app.ui.help.private.keyboard"
+                          }
                         }
                       }
                     }
@@ -8079,13 +8174,15 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "getChatMember",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "user_id": "{{user.id}}"
-                  },
-                  "as": "actorStatus"
+                  "type": "api.call",
+                  "as": "actorStatus",
+                  "api": "telegram.getChatMember",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "user_id": "{{user.id}}"
+                    }
+                  }
                 }
               ],
               "catch": [
@@ -8111,17 +8208,19 @@ export default {
               },
               "then": [
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "{{runtime.app.ui.help.groupAdmin.text}}",
-                    "parse_mode": "HTML",
-                    "reply_markup": {
-                      "inline_keyboard": {
-                        "$expr": {
-                          "op": "get",
-                          "path": "runtime.app.ui.help.groupAdmin.keyboard"
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "{{runtime.app.ui.help.groupAdmin.text}}",
+                      "parse_mode": "HTML",
+                      "reply_markup": {
+                        "inline_keyboard": {
+                          "$expr": {
+                            "op": "get",
+                            "path": "runtime.app.ui.help.groupAdmin.keyboard"
+                          }
                         }
                       }
                     }
@@ -8130,17 +8229,19 @@ export default {
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "{{runtime.app.ui.help.groupMember.text}}",
-                    "parse_mode": "HTML",
-                    "reply_markup": {
-                      "inline_keyboard": {
-                        "$expr": {
-                          "op": "get",
-                          "path": "runtime.app.ui.help.groupMember.keyboard"
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "{{runtime.app.ui.help.groupMember.text}}",
+                      "parse_mode": "HTML",
+                      "reply_markup": {
+                        "inline_keyboard": {
+                          "$expr": {
+                            "op": "get",
+                            "path": "runtime.app.ui.help.groupMember.keyboard"
+                          }
                         }
                       }
                     }
@@ -8343,282 +8444,479 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "message_id": "{{message.message_id}}",
-                "text": "<b>مدیریت گروه MUNITOS</b>\n\nگروه: <b>{{chat.title}}</b>\nخوش‌آمدگویی: <b>{{welcomeToggleLabel}}</b>\nخداحافظی: <b>{{goodbyeToggleLabel}}</b>\nعضویت اجباری: <b>{{forceJoinToggleLabel}}</b>\nمقصدهای جوین: <b>{{forceJoinCount}}</b>\n\nاز دکمه‌های زیر برای تنظیم پیام‌ها و مدیریت اعضا استفاده کنید. این پنل فقط برای مدیران گروه باز می‌شود.",
-                "parse_mode": "HTML",
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "✏️ تنظیم خوش‌آمد",
-                        "callback_data": "group:welcome:set",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "✏️ تنظیم خداحافظی",
-                        "callback_data": "group:goodbye:set",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "{{welcomeToggleLabel}}",
-                        "callback_data": "group:welcome:toggle",
-                        "style": "{{welcomeToggleStyle}}"
-                      },
-                      {
-                        "text": "{{goodbyeToggleLabel}}",
-                        "callback_data": "group:goodbye:toggle",
-                        "style": "{{goodbyeToggleStyle}}"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "👁 مشاهده پیام خوش‌آمد",
-                        "callback_data": "ui:cmd:getwelcome",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "👁 مشاهده پیام خداحافظی",
-                        "callback_data": "ui:cmd:getgoodbye",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "⏱ تأخیر خوش‌آمد",
-                        "callback_data": "ui:cmd:setwelcometime",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "🖼 رسانه خوش‌آمد",
-                        "callback_data": "ui:cmd:setwelcomemedia",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🖼 رسانه خداحافظی",
-                        "callback_data": "ui:cmd:setgoodbyemedia",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "♻️ بازنشانی پیام‌ها",
-                        "callback_data": "group:templates:reset",
-                        "style": "danger"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "{{forceJoinToggleLabel}}",
-                        "callback_data": "group:forcejoin:toggle",
-                        "style": "{{forceJoinToggleStyle}}"
-                      },
-                      {
-                        "text": "⚙️ تنظیم فهرست جوین",
-                        "callback_data": "group:forcejoin",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "📋 وضعیت مقصدهای جوین",
-                        "callback_data": "group:forcejoin:status",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "🧹 پاک‌کردن جوین",
-                        "callback_data": "group:forcejoin:clear",
-                        "style": "danger"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🛡 مدیریت اعضا",
-                        "callback_data": "group:moderation",
-                        "style": "danger"
-                      },
-                      {
-                        "text": "🔑 راهنمای مجوزها",
-                        "callback_data": "group:permissions",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "📝 تنظیم پیام ورود ربات",
-                        "callback_data": "group:install:set",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "👁 مشاهده پیام ورود",
-                        "callback_data": "ui:cmd:getinstallmsg",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🔴 بازنشانی پیام ورود",
-                        "callback_data": "group:install:reset",
-                        "style": "danger"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "⬅️ راهنما",
-                        "callback_data": "ui:help",
-                        "style": "primary"
-                      }
+              "type": "api.call",
+              "api": "telegram.editMessageText",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "message_id": "{{message.message_id}}",
+                  "text": "<b>مدیریت گروه MUNITOS</b>\n\nگروه: <b>{{chat.title}}</b>\nخوش‌آمدگویی: <b>{{welcomeToggleLabel}}</b>\nخداحافظی: <b>{{goodbyeToggleLabel}}</b>\nعضویت اجباری: <b>{{forceJoinToggleLabel}}</b>\nمقصدهای جوین: <b>{{forceJoinCount}}</b>\n\nاز دکمه‌های زیر برای تنظیم پیام‌ها و مدیریت اعضا استفاده کنید. این پنل فقط برای مدیران گروه باز می‌شود.",
+                  "parse_mode": "HTML",
+                  "reply_markup": {
+                    "inline_keyboard": [
+                      [
+                        {
+                          "text": "✏️ تنظیم خوش‌آمد",
+                          "callback_data": "group:welcome:set",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "✏️ تنظیم خداحافظی",
+                          "callback_data": "group:goodbye:set",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "{{welcomeToggleLabel}}",
+                          "callback_data": "group:welcome:toggle",
+                          "style": "{{welcomeToggleStyle}}"
+                        },
+                        {
+                          "text": "{{goodbyeToggleLabel}}",
+                          "callback_data": "group:goodbye:toggle",
+                          "style": "{{goodbyeToggleStyle}}"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "👁 مشاهده پیام خوش‌آمد",
+                          "callback_data": "ui:cmd:getwelcome",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "👁 مشاهده پیام خداحافظی",
+                          "callback_data": "ui:cmd:getgoodbye",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "⏱ تأخیر خوش‌آمد",
+                          "callback_data": "ui:cmd:setwelcometime",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "🖼 رسانه خوش‌آمد",
+                          "callback_data": "ui:cmd:setwelcomemedia",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "🖼 رسانه خداحافظی",
+                          "callback_data": "ui:cmd:setgoodbyemedia",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "♻️ بازنشانی پیام‌ها",
+                          "callback_data": "group:templates:reset",
+                          "style": "danger"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "{{forceJoinToggleLabel}}",
+                          "callback_data": "group:forcejoin:toggle",
+                          "style": "{{forceJoinToggleStyle}}"
+                        },
+                        {
+                          "text": "⚙️ تنظیم فهرست جوین",
+                          "callback_data": "group:forcejoin",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "📋 وضعیت مقصدهای جوین",
+                          "callback_data": "group:forcejoin:status",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "🧹 پاک‌کردن جوین",
+                          "callback_data": "group:forcejoin:clear",
+                          "style": "danger"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "🛡 مدیریت اعضا",
+                          "callback_data": "group:moderation",
+                          "style": "danger"
+                        },
+                        {
+                          "text": "🔑 راهنمای مجوزها",
+                          "callback_data": "group:permissions",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "📝 تنظیم پیام ورود ربات",
+                          "callback_data": "group:install:set",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "👁 مشاهده پیام ورود",
+                          "callback_data": "ui:cmd:getinstallmsg",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "🔴 بازنشانی پیام ورود",
+                          "callback_data": "group:install:reset",
+                          "style": "danger"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "⬅️ راهنما",
+                          "callback_data": "ui:help",
+                          "style": "primary"
+                        }
+                      ]
                     ]
-                  ]
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "<b>مدیریت گروه MUNITOS</b>\n\nگروه: <b>{{chat.title}}</b>\nخوش‌آمدگویی: <b>{{welcomeToggleLabel}}</b>\nخداحافظی: <b>{{goodbyeToggleLabel}}</b>\nعضویت اجباری: <b>{{forceJoinToggleLabel}}</b>\nمقصدهای جوین: <b>{{forceJoinCount}}</b>\n\nاز دکمه‌های زیر برای تنظیم پیام‌ها و مدیریت اعضا استفاده کنید. این پنل فقط برای مدیران گروه باز می‌شود.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
-                },
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "✏️ تنظیم خوش‌آمد",
-                        "callback_data": "group:welcome:set",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "✏️ تنظیم خداحافظی",
-                        "callback_data": "group:goodbye:set",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "{{welcomeToggleLabel}}",
-                        "callback_data": "group:welcome:toggle",
-                        "style": "{{welcomeToggleStyle}}"
-                      },
-                      {
-                        "text": "{{goodbyeToggleLabel}}",
-                        "callback_data": "group:goodbye:toggle",
-                        "style": "{{goodbyeToggleStyle}}"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "👁 مشاهده پیام خوش‌آمد",
-                        "callback_data": "ui:cmd:getwelcome",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "👁 مشاهده پیام خداحافظی",
-                        "callback_data": "ui:cmd:getgoodbye",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "⏱ تأخیر خوش‌آمد",
-                        "callback_data": "ui:cmd:setwelcometime",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "🖼 رسانه خوش‌آمد",
-                        "callback_data": "ui:cmd:setwelcomemedia",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🖼 رسانه خداحافظی",
-                        "callback_data": "ui:cmd:setgoodbyemedia",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "♻️ بازنشانی پیام‌ها",
-                        "callback_data": "group:templates:reset",
-                        "style": "danger"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "{{forceJoinToggleLabel}}",
-                        "callback_data": "group:forcejoin:toggle",
-                        "style": "{{forceJoinToggleStyle}}"
-                      },
-                      {
-                        "text": "⚙️ تنظیم فهرست جوین",
-                        "callback_data": "group:forcejoin",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "📋 وضعیت مقصدهای جوین",
-                        "callback_data": "group:forcejoin:status",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "🧹 پاک‌کردن جوین",
-                        "callback_data": "group:forcejoin:clear",
-                        "style": "danger"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🛡 مدیریت اعضا",
-                        "callback_data": "group:moderation",
-                        "style": "danger"
-                      },
-                      {
-                        "text": "🔑 راهنمای مجوزها",
-                        "callback_data": "group:permissions",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "📝 تنظیم پیام ورود ربات",
-                        "callback_data": "group:install:set",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "👁 مشاهده پیام ورود",
-                        "callback_data": "ui:cmd:getinstallmsg",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🔴 بازنشانی پیام ورود",
-                        "callback_data": "group:install:reset",
-                        "style": "danger"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "⬅️ راهنما",
-                        "callback_data": "ui:help",
-                        "style": "primary"
-                      }
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "<b>مدیریت گروه MUNITOS</b>\n\nگروه: <b>{{chat.title}}</b>\nخوش‌آمدگویی: <b>{{welcomeToggleLabel}}</b>\nخداحافظی: <b>{{goodbyeToggleLabel}}</b>\nعضویت اجباری: <b>{{forceJoinToggleLabel}}</b>\nمقصدهای جوین: <b>{{forceJoinCount}}</b>\n\nاز دکمه‌های زیر برای تنظیم پیام‌ها و مدیریت اعضا استفاده کنید. این پنل فقط برای مدیران گروه باز می‌شود.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  },
+                  "reply_markup": {
+                    "inline_keyboard": [
+                      [
+                        {
+                          "text": "✏️ تنظیم خوش‌آمد",
+                          "callback_data": "group:welcome:set",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "✏️ تنظیم خداحافظی",
+                          "callback_data": "group:goodbye:set",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "{{welcomeToggleLabel}}",
+                          "callback_data": "group:welcome:toggle",
+                          "style": "{{welcomeToggleStyle}}"
+                        },
+                        {
+                          "text": "{{goodbyeToggleLabel}}",
+                          "callback_data": "group:goodbye:toggle",
+                          "style": "{{goodbyeToggleStyle}}"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "👁 مشاهده پیام خوش‌آمد",
+                          "callback_data": "ui:cmd:getwelcome",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "👁 مشاهده پیام خداحافظی",
+                          "callback_data": "ui:cmd:getgoodbye",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "⏱ تأخیر خوش‌آمد",
+                          "callback_data": "ui:cmd:setwelcometime",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "🖼 رسانه خوش‌آمد",
+                          "callback_data": "ui:cmd:setwelcomemedia",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "🖼 رسانه خداحافظی",
+                          "callback_data": "ui:cmd:setgoodbyemedia",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "♻️ بازنشانی پیام‌ها",
+                          "callback_data": "group:templates:reset",
+                          "style": "danger"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "{{forceJoinToggleLabel}}",
+                          "callback_data": "group:forcejoin:toggle",
+                          "style": "{{forceJoinToggleStyle}}"
+                        },
+                        {
+                          "text": "⚙️ تنظیم فهرست جوین",
+                          "callback_data": "group:forcejoin",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "📋 وضعیت مقصدهای جوین",
+                          "callback_data": "group:forcejoin:status",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "🧹 پاک‌کردن جوین",
+                          "callback_data": "group:forcejoin:clear",
+                          "style": "danger"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "🛡 مدیریت اعضا",
+                          "callback_data": "group:moderation",
+                          "style": "danger"
+                        },
+                        {
+                          "text": "🔑 راهنمای مجوزها",
+                          "callback_data": "group:permissions",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "📝 تنظیم پیام ورود ربات",
+                          "callback_data": "group:install:set",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "👁 مشاهده پیام ورود",
+                          "callback_data": "ui:cmd:getinstallmsg",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "🔴 بازنشانی پیام ورود",
+                          "callback_data": "group:install:reset",
+                          "style": "danger"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "⬅️ راهنما",
+                          "callback_data": "ui:help",
+                          "style": "primary"
+                        }
+                      ]
                     ]
-                  ]
+                  }
                 }
               }
             }
           ]
+        }
+      ]
+    },
+    "system.initialize": {
+      "actions": [
+        {
+          "type": "api.call",
+          "as": "botInfo",
+          "api": "telegram.getMe",
+          "input": {
+            "payload": {}
+          }
+        },
+        {
+          "type": "state.set",
+          "scope": "global",
+          "key": "bot:id",
+          "value": "{{botInfo.id}}"
+        },
+        {
+          "type": "state.set",
+          "scope": "global",
+          "key": "bot:username",
+          "value": "{{botInfo.username}}"
+        },
+        {
+          "type": "state.set",
+          "scope": "global",
+          "key": "bot:first_name",
+          "value": "{{botInfo.first_name}}"
+        },
+        {
+          "type": "try",
+          "actions": [
+            {
+              "type": "api.call",
+              "api": "telegram.setMyName",
+              "input": {
+                "payload": {
+                  "name": "{{runtime.profile.name}}"
+                }
+              }
+            }
+          ],
+          "catch": []
+        },
+        {
+          "type": "try",
+          "actions": [
+            {
+              "type": "api.call",
+              "api": "telegram.setMyDescription",
+              "input": {
+                "payload": {
+                  "description": "{{runtime.profile.description}}"
+                }
+              }
+            }
+          ],
+          "catch": []
+        },
+        {
+          "type": "try",
+          "actions": [
+            {
+              "type": "api.call",
+              "api": "telegram.setMyShortDescription",
+              "input": {
+                "payload": {
+                  "short_description": "{{runtime.profile.shortDescription}}"
+                }
+              }
+            }
+          ],
+          "catch": []
+        },
+        {
+          "type": "condition",
+          "if": {
+            "eq": [
+              "{{runtime.syncTelegramCommands}}",
+              true
+            ]
+          },
+          "then": [
+            {
+              "type": "try",
+              "actions": [
+                {
+                  "type": "api.call",
+                  "api": "telegram.setMyCommands",
+                  "input": {
+                    "payload": {
+                      "commands": {
+                        "$expr": {
+                          "op": "get",
+                          "path": "runtime.app.menus.commandSets.private"
+                        }
+                      },
+                      "scope": {
+                        "type": "all_private_chats"
+                      }
+                    }
+                  }
+                }
+              ],
+              "catch": []
+            },
+            {
+              "type": "try",
+              "actions": [
+                {
+                  "type": "api.call",
+                  "api": "telegram.setMyCommands",
+                  "input": {
+                    "payload": {
+                      "commands": {
+                        "$expr": {
+                          "op": "get",
+                          "path": "runtime.app.menus.commandSets.groupMember"
+                        }
+                      },
+                      "scope": {
+                        "type": "all_group_chats"
+                      }
+                    }
+                  }
+                }
+              ],
+              "catch": []
+            },
+            {
+              "type": "try",
+              "actions": [
+                {
+                  "type": "api.call",
+                  "api": "telegram.setMyCommands",
+                  "input": {
+                    "payload": {
+                      "commands": {
+                        "$expr": {
+                          "op": "get",
+                          "path": "runtime.app.menus.commandSets.groupAdmin"
+                        }
+                      },
+                      "scope": {
+                        "type": "all_chat_administrators"
+                      }
+                    }
+                  }
+                }
+              ],
+              "catch": []
+            },
+            {
+              "type": "try",
+              "actions": [
+                {
+                  "type": "api.call",
+                  "api": "telegram.setMyCommands",
+                  "input": {
+                    "payload": {
+                      "commands": {
+                        "$expr": {
+                          "op": "get",
+                          "path": "runtime.app.menus.commandSets.owner"
+                        }
+                      },
+                      "scope": {
+                        "type": "chat",
+                        "chat_id": "{{owner.id}}"
+                      }
+                    }
+                  }
+                }
+              ],
+              "catch": []
+            }
+          ],
+          "else": []
+        },
+        {
+          "type": "api.call",
+          "as": "webhookSet",
+          "api": "telegram.setWebhook",
+          "input": {
+            "payload": {
+              "url": "{{runtime.webhookUrl}}",
+              "allowed_updates": "{{runtime.allowedUpdates}}",
+              "drop_pending_updates": "{{runtime.dropPendingUpdates}}",
+              "max_connections": "{{runtime.maxWebhookConnections}}"
+            }
+          }
         }
       ]
     }
@@ -8673,7 +8971,6 @@ export default {
               "type": "state.get",
               "scope": "global",
               "key": "moderation:{{chat.id}}:banned:{{newMember.id}}",
-              "default": null,
               "as": "persistentlyBanned"
             },
             {
@@ -8686,24 +8983,17 @@ export default {
                   "type": "try",
                   "actions": [
                     {
-                      "type": "telegram.call",
-                      "method": "banChatMember",
-                      "payload": {
-                        "chat_id": "{{chat.id}}",
-                        "user_id": "{{newMember.id}}"
+                      "type": "api.call",
+                      "api": "telegram.banChatMember",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{chat.id}}",
+                          "user_id": "{{newMember.id}}"
+                        }
                       }
                     }
                   ],
-                  "catch": [
-                    {
-                      "type": "log.write",
-                      "entry": {
-                        "level": "warn",
-                        "code": "moderation.reban_failed",
-                        "detail": "{{chat.id}}:{{newMember.id}}:{{error.message}}"
-                      }
-                    }
-                  ]
+                  "catch": []
                 }
               ],
               "else": [
@@ -8755,7 +9045,6 @@ export default {
           "type": "state.get",
           "scope": "global",
           "key": "bot:id",
-          "default": null,
           "as": "botId"
         },
         {
@@ -8963,32 +9252,36 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": {
-              "$expr": {
-                "op": "concat",
-                "args": [
-                  "<b>شناسه کاربر:</b> <code>",
-                  "{{user.id}}",
-                  "</code>\n<b>شناسه گفتگو:</b> <code>",
-                  "{{chat.id}}",
-                  "</code>"
-                ]
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": {
+                "$expr": {
+                  "op": "concat",
+                  "args": [
+                    "<b>شناسه کاربر:</b> <code>",
+                    "{{user.id}}",
+                    "</code>\n<b>شناسه گفتگو:</b> <code>",
+                    "{{chat.id}}",
+                    "</code>"
+                  ]
+                }
+              },
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
               }
-            },
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
             }
           }
         }
@@ -9003,21 +9296,25 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "برای مشاهده سهمیه، فرمان <code>/quota</code> را ارسال کنید.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "برای مشاهده سهمیه، فرمان <code>/quota</code> را ارسال کنید.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -9032,10 +9329,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9059,10 +9358,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9086,10 +9387,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9106,14 +9409,16 @@ export default {
           }
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>پیام خوش‌آمد را ارسال کنید.</b> متن یا رسانه را بفرستید؛ برای متن دارای متغیر از <code>/setwelcome متن</code> استفاده کنید.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>پیام خوش‌آمد را ارسال کنید.</b> متن یا رسانه را بفرستید؛ برای متن دارای متغیر از <code>/setwelcome متن</code> استفاده کنید.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -9128,10 +9433,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9148,14 +9455,16 @@ export default {
           }
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>پیام خداحافظی را ارسال کنید.</b> متن یا رسانه را بفرستید.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>پیام خداحافظی را ارسال کنید.</b> متن یا رسانه را بفرستید.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -9170,10 +9479,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9190,14 +9501,16 @@ export default {
           }
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>پیام ورود ربات را ارسال کنید.</b> متن یا هر نوع رسانه پذیرفته می‌شود.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>پیام ورود ربات را ارسال کنید.</b> متن یا هر نوع رسانه پذیرفته می‌شود.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -9212,10 +9525,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9238,32 +9553,34 @@ export default {
           "limit": 20
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": {
-              "$expr": {
-                "op": "concat",
-                "args": [
-                  "<b>عضویت اجباری گروه</b>\nوضعیت: ",
-                  {
-                    "$expr": {
-                      "op": "get",
-                      "args": [
-                        "{{forceEnabled}}"
-                      ]
-                    }
-                  },
-                  "\nتعداد مقصدها: <b>",
-                  "{{forceTargets.count}}",
-                  "</b>"
-                ]
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": {
+                "$expr": {
+                  "op": "concat",
+                  "args": [
+                    "<b>عضویت اجباری گروه</b>\nوضعیت: ",
+                    {
+                      "$expr": {
+                        "op": "get",
+                        "args": [
+                          "{{forceEnabled}}"
+                        ]
+                      }
+                    },
+                    "\nتعداد مقصدها: <b>",
+                    "{{forceTargets.count}}",
+                    "</b>"
+                  ]
+                }
+              },
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
               }
-            },
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
             }
           }
         }
@@ -9278,10 +9595,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9290,14 +9609,16 @@ export default {
           "input": {}
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>کنترل سطح دسترسی</b>\nبرای سکوت/بن، مدیر اجراکننده و خود ربات باید دسترسی <code>Restrict Members</code> داشته باشند. برای اجرای عضویت اجباری در همین گروه، ربات به <code>Delete Messages</code> نیز نیاز دارد.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>کنترل سطح دسترسی</b>\nبرای سکوت/بن، مدیر اجراکننده و خود ربات باید دسترسی <code>Restrict Members</code> داشته باشند. برای اجرای عضویت اجباری در همین گروه، ربات به <code>Delete Messages</code> نیز نیاز دارد.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -9312,11 +9633,13 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}",
-            "text": "در حال بررسی عضویت…"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}",
+              "text": "در حال بررسی عضویت…"
+            }
           }
         },
         {
@@ -9340,10 +9663,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9362,10 +9687,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9422,10 +9749,12 @@ export default {
           "input": {}
         },
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9512,21 +9841,23 @@ export default {
                           },
                           "then": [
                             {
-                              "type": "telegram.call",
-                              "method": "editMessageText",
-                              "payload": {
-                                "chat_id": "{{callback.message.chat.id}}",
-                                "message_id": "{{callback.message.message_id}}",
-                                "text": "{{uiSection.groupEnabledText}}",
-                                "parse_mode": "HTML",
-                                "link_preview_options": {
-                                  "is_disabled": true
-                                },
-                                "reply_markup": {
-                                  "inline_keyboard": {
-                                    "$expr": {
-                                      "op": "get",
-                                      "path": "uiSection.groupEnabledKeyboard"
+                              "type": "api.call",
+                              "api": "telegram.editMessageText",
+                              "input": {
+                                "payload": {
+                                  "chat_id": "{{callback.message.chat.id}}",
+                                  "message_id": "{{callback.message.message_id}}",
+                                  "text": "{{uiSection.groupEnabledText}}",
+                                  "parse_mode": "HTML",
+                                  "link_preview_options": {
+                                    "is_disabled": true
+                                  },
+                                  "reply_markup": {
+                                    "inline_keyboard": {
+                                      "$expr": {
+                                        "op": "get",
+                                        "path": "uiSection.groupEnabledKeyboard"
+                                      }
                                     }
                                   }
                                 }
@@ -9535,21 +9866,23 @@ export default {
                           ],
                           "else": [
                             {
-                              "type": "telegram.call",
-                              "method": "editMessageText",
-                              "payload": {
-                                "chat_id": "{{callback.message.chat.id}}",
-                                "message_id": "{{callback.message.message_id}}",
-                                "text": "{{uiSection.groupDisabledText}}",
-                                "parse_mode": "HTML",
-                                "link_preview_options": {
-                                  "is_disabled": true
-                                },
-                                "reply_markup": {
-                                  "inline_keyboard": {
-                                    "$expr": {
-                                      "op": "get",
-                                      "path": "uiSection.groupDisabledKeyboard"
+                              "type": "api.call",
+                              "api": "telegram.editMessageText",
+                              "input": {
+                                "payload": {
+                                  "chat_id": "{{callback.message.chat.id}}",
+                                  "message_id": "{{callback.message.message_id}}",
+                                  "text": "{{uiSection.groupDisabledText}}",
+                                  "parse_mode": "HTML",
+                                  "link_preview_options": {
+                                    "is_disabled": true
+                                  },
+                                  "reply_markup": {
+                                    "inline_keyboard": {
+                                      "$expr": {
+                                        "op": "get",
+                                        "path": "uiSection.groupDisabledKeyboard"
+                                      }
                                     }
                                   }
                                 }
@@ -9560,21 +9893,23 @@ export default {
                       ],
                       "else": [
                         {
-                          "type": "telegram.call",
-                          "method": "editMessageText",
-                          "payload": {
-                            "chat_id": "{{callback.message.chat.id}}",
-                            "message_id": "{{callback.message.message_id}}",
-                            "text": "{{uiSection.text}}",
-                            "parse_mode": "HTML",
-                            "link_preview_options": {
-                              "is_disabled": true
-                            },
-                            "reply_markup": {
-                              "inline_keyboard": {
-                                "$expr": {
-                                  "op": "get",
-                                  "path": "uiSection.keyboard"
+                          "type": "api.call",
+                          "api": "telegram.editMessageText",
+                          "input": {
+                            "payload": {
+                              "chat_id": "{{callback.message.chat.id}}",
+                              "message_id": "{{callback.message.message_id}}",
+                              "text": "{{uiSection.text}}",
+                              "parse_mode": "HTML",
+                              "link_preview_options": {
+                                "is_disabled": true
+                              },
+                              "reply_markup": {
+                                "inline_keyboard": {
+                                  "$expr": {
+                                    "op": "get",
+                                    "path": "uiSection.keyboard"
+                                  }
                                 }
                               }
                             }
@@ -9610,21 +9945,23 @@ export default {
                           },
                           "then": [
                             {
-                              "type": "telegram.call",
-                              "method": "editMessageText",
-                              "payload": {
-                                "chat_id": "{{callback.message.chat.id}}",
-                                "message_id": "{{callback.message.message_id}}",
-                                "text": "{{uiSection.groupEnabledText}}",
-                                "parse_mode": "HTML",
-                                "link_preview_options": {
-                                  "is_disabled": true
-                                },
-                                "reply_markup": {
-                                  "inline_keyboard": {
-                                    "$expr": {
-                                      "op": "get",
-                                      "path": "uiSection.groupEnabledKeyboard"
+                              "type": "api.call",
+                              "api": "telegram.editMessageText",
+                              "input": {
+                                "payload": {
+                                  "chat_id": "{{callback.message.chat.id}}",
+                                  "message_id": "{{callback.message.message_id}}",
+                                  "text": "{{uiSection.groupEnabledText}}",
+                                  "parse_mode": "HTML",
+                                  "link_preview_options": {
+                                    "is_disabled": true
+                                  },
+                                  "reply_markup": {
+                                    "inline_keyboard": {
+                                      "$expr": {
+                                        "op": "get",
+                                        "path": "uiSection.groupEnabledKeyboard"
+                                      }
                                     }
                                   }
                                 }
@@ -9633,21 +9970,23 @@ export default {
                           ],
                           "else": [
                             {
-                              "type": "telegram.call",
-                              "method": "editMessageText",
-                              "payload": {
-                                "chat_id": "{{callback.message.chat.id}}",
-                                "message_id": "{{callback.message.message_id}}",
-                                "text": "{{uiSection.groupDisabledText}}",
-                                "parse_mode": "HTML",
-                                "link_preview_options": {
-                                  "is_disabled": true
-                                },
-                                "reply_markup": {
-                                  "inline_keyboard": {
-                                    "$expr": {
-                                      "op": "get",
-                                      "path": "uiSection.groupDisabledKeyboard"
+                              "type": "api.call",
+                              "api": "telegram.editMessageText",
+                              "input": {
+                                "payload": {
+                                  "chat_id": "{{callback.message.chat.id}}",
+                                  "message_id": "{{callback.message.message_id}}",
+                                  "text": "{{uiSection.groupDisabledText}}",
+                                  "parse_mode": "HTML",
+                                  "link_preview_options": {
+                                    "is_disabled": true
+                                  },
+                                  "reply_markup": {
+                                    "inline_keyboard": {
+                                      "$expr": {
+                                        "op": "get",
+                                        "path": "uiSection.groupDisabledKeyboard"
+                                      }
                                     }
                                   }
                                 }
@@ -9658,21 +9997,23 @@ export default {
                       ],
                       "else": [
                         {
-                          "type": "telegram.call",
-                          "method": "editMessageText",
-                          "payload": {
-                            "chat_id": "{{callback.message.chat.id}}",
-                            "message_id": "{{callback.message.message_id}}",
-                            "text": "{{uiSection.text}}",
-                            "parse_mode": "HTML",
-                            "link_preview_options": {
-                              "is_disabled": true
-                            },
-                            "reply_markup": {
-                              "inline_keyboard": {
-                                "$expr": {
-                                  "op": "get",
-                                  "path": "uiSection.keyboard"
+                          "type": "api.call",
+                          "api": "telegram.editMessageText",
+                          "input": {
+                            "payload": {
+                              "chat_id": "{{callback.message.chat.id}}",
+                              "message_id": "{{callback.message.message_id}}",
+                              "text": "{{uiSection.text}}",
+                              "parse_mode": "HTML",
+                              "link_preview_options": {
+                                "is_disabled": true
+                              },
+                              "reply_markup": {
+                                "inline_keyboard": {
+                                  "$expr": {
+                                    "op": "get",
+                                    "path": "uiSection.keyboard"
+                                  }
                                 }
                               }
                             }
@@ -9685,21 +10026,23 @@ export default {
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "editMessageText",
-                  "payload": {
-                    "chat_id": "{{callback.message.chat.id}}",
-                    "message_id": "{{callback.message.message_id}}",
-                    "text": "{{uiSection.text}}",
-                    "parse_mode": "HTML",
-                    "link_preview_options": {
-                      "is_disabled": true
-                    },
-                    "reply_markup": {
-                      "inline_keyboard": {
-                        "$expr": {
-                          "op": "get",
-                          "path": "uiSection.keyboard"
+                  "type": "api.call",
+                  "api": "telegram.editMessageText",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{callback.message.chat.id}}",
+                      "message_id": "{{callback.message.message_id}}",
+                      "text": "{{uiSection.text}}",
+                      "parse_mode": "HTML",
+                      "link_preview_options": {
+                        "is_disabled": true
+                      },
+                      "reply_markup": {
+                        "inline_keyboard": {
+                          "$expr": {
+                            "op": "get",
+                            "path": "uiSection.keyboard"
+                          }
                         }
                       }
                     }
@@ -9710,21 +10053,23 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{callback.message.chat.id}}",
-                "message_id": "{{callback.message.message_id}}",
-                "text": "{{uiSection.text}}",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
-                },
-                "reply_markup": {
-                  "inline_keyboard": {
-                    "$expr": {
-                      "op": "get",
-                      "path": "uiSection.keyboard"
+              "type": "api.call",
+              "api": "telegram.editMessageText",
+              "input": {
+                "payload": {
+                  "chat_id": "{{callback.message.chat.id}}",
+                  "message_id": "{{callback.message.message_id}}",
+                  "text": "{{uiSection.text}}",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  },
+                  "reply_markup": {
+                    "inline_keyboard": {
+                      "$expr": {
+                        "op": "get",
+                        "path": "uiSection.keyboard"
+                      }
                     }
                   }
                 }
@@ -9748,10 +10093,12 @@ export default {
           "input": {}
         },
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -9780,28 +10127,30 @@ export default {
           }
         },
         {
-          "type": "telegram.call",
-          "method": "editMessageText",
-          "payload": {
-            "chat_id": "{{callback.message.chat.id}}",
-            "message_id": "{{callback.message.message_id}}",
-            "parse_mode": "HTML",
-            "text": "<b>{{uiCommand.title}}</b>\n\n{{uiCommand.description}}\n\n<b>فرمان</b>\n<code>{{uiCommand.triggerText}}</code>\n\n<b>نحوه استفاده</b>\n<code>{{uiCommand.usage}}</code>\n\n<b>محدوده دسترسی</b> · {{uiCommand.scopeText}}",
-            "reply_markup": {
-              "inline_keyboard": [
-                [
-                  {
-                    "text": "⬅️ بازگشت به بخش",
-                    "callback_data": "ui:section:{{uiCommand.section}}",
-                    "style": "primary"
-                  },
-                  {
-                    "text": "🏠 راهنمای اصلی",
-                    "callback_data": "ui:help",
-                    "style": "primary"
-                  }
+          "type": "api.call",
+          "api": "telegram.editMessageText",
+          "input": {
+            "payload": {
+              "chat_id": "{{callback.message.chat.id}}",
+              "message_id": "{{callback.message.message_id}}",
+              "parse_mode": "HTML",
+              "text": "<b>{{uiCommand.title}}</b>\n\n{{uiCommand.description}}\n\n<b>فرمان</b>\n<code>{{uiCommand.triggerText}}</code>\n\n<b>نحوه استفاده</b>\n<code>{{uiCommand.usage}}</code>\n\n<b>محدوده دسترسی</b> · {{uiCommand.scopeText}}",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [
+                    {
+                      "text": "⬅️ بازگشت به بخش",
+                      "callback_data": "ui:section:{{uiCommand.section}}",
+                      "style": "primary"
+                    },
+                    {
+                      "text": "🏠 راهنمای اصلی",
+                      "callback_data": "ui:help",
+                      "style": "primary"
+                    }
+                  ]
                 ]
-              ]
+              }
             }
           }
         }
@@ -9830,28 +10179,32 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{callback.message.chat.id}}",
-                "message_id": "{{callback.message.message_id}}",
-                "text": "{{runtime.app.ui.owner.home.text}}",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
-                },
-                "reply_markup": {
-                  "inline_keyboard": {
-                    "$expr": {
-                      "op": "get",
-                      "path": "runtime.app.ui.owner.home.keyboard"
+              "type": "api.call",
+              "api": "telegram.editMessageText",
+              "input": {
+                "payload": {
+                  "chat_id": "{{callback.message.chat.id}}",
+                  "message_id": "{{callback.message.message_id}}",
+                  "text": "{{runtime.app.ui.owner.home.text}}",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  },
+                  "reply_markup": {
+                    "inline_keyboard": {
+                      "$expr": {
+                        "op": "get",
+                        "path": "runtime.app.ui.owner.home.keyboard"
+                      }
                     }
                   }
                 }
@@ -9860,12 +10213,14 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "این بخش فقط برای مالک ربات فعال است.",
-                "show_alert": false
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "این بخش فقط برای مالک ربات فعال است.",
+                  "show_alert": false
+                }
               }
             }
           ]
@@ -9895,10 +10250,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -9925,12 +10282,14 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات به این بخش دسترسی دارد.",
-                "show_alert": false
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات به این بخش دسترسی دارد.",
+                  "show_alert": false
+                }
               }
             }
           ]
@@ -9960,10 +10319,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -9990,12 +10351,14 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات به این بخش دسترسی دارد.",
-                "show_alert": false
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات به این بخش دسترسی دارد.",
+                  "show_alert": false
+                }
               }
             }
           ]
@@ -10025,10 +10388,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -10040,22 +10405,26 @@ export default {
               }
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "📢 پیام یا رسانه موردنظر را در پیام بعدی بفرست. پیش از ارسال، پیش‌نمایش برای تأیید نمایش داده می‌شود.\nبرای لغو /cancel را بفرست."
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "📢 پیام یا رسانه موردنظر را در پیام بعدی بفرست. پیش از ارسال، پیش‌نمایش برای تأیید نمایش داده می‌شود.\nبرای لغو /cancel را بفرست."
+                }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات به این بخش دسترسی دارد.",
-                "show_alert": false
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات به این بخش دسترسی دارد.",
+                  "show_alert": false
+                }
               }
             }
           ]
@@ -10085,10 +10454,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -10096,55 +10467,54 @@ export default {
               "as": "status"
             },
             {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{callback.message.chat.id}}",
-                "message_id": "{{callback.message.message_id}}",
-                "text": "<b>◈ MUNITOS RUNTIME</b>\n━━━━━━━━━━━━━━━━━━\nنسخه موتور: <code>{{status.runtimeVersion}}</code>\nنسخه دیتابیس: <code>{{status.databaseVersion}}</code>\nوضعیت توقف: {{status.paused}}\nفرمان‌ها: {{status.commands}}\nWorkflowها: {{status.workflows}}\nAPIها: {{status.apis}}\nرویدادها: {{status.events}}\nصف در انتظار: {{status.queuedJobs}}\nمقصدهای ثبت‌شده: {{status.registeredChats}}",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
-                },
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "🧾 صف پردازش",
-                        "callback_data": "ui:owner:queue",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "📜 گزارش‌ها",
-                        "callback_data": "ui:owner:logs",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "🔄 تازه‌سازی",
-                        "callback_data": "ui:owner:status",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "⬅️ پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
+              "type": "api.call",
+              "api": "telegram.editMessageText",
+              "input": {
+                "payload": {
+                  "chat_id": "{{callback.message.chat.id}}",
+                  "message_id": "{{callback.message.message_id}}",
+                  "text": "<b>◈ MUNITOS RUNTIME</b>\n━━━━━━━━━━━━━━━━━━\nنسخه موتور: <code>{{status.runtimeVersion}}</code>\nنسخه دیتابیس: <code>{{status.databaseVersion}}</code>\nوضعیت توقف: {{status.paused}}\nفرمان‌ها: {{status.commands}}\nWorkflowها: {{status.workflows}}\nAPIها: {{status.apis}}\nرویدادها: {{status.events}}\nصف در انتظار: {{status.queuedJobs}}\nمقصدهای ثبت‌شده: {{status.registeredChats}}",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  },
+                  "reply_markup": {
+                    "inline_keyboard": [
+                      [
+                        {
+                          "text": "🧾 صف پردازش",
+                          "callback_data": "ui:owner:queue",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "🔄 تازه‌سازی",
+                          "callback_data": "ui:owner:status",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "⬅️ پنل مدیریت",
+                          "callback_data": "ui:owner:home",
+                          "style": "primary"
+                        }
+                      ]
                     ]
-                  ]
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات به این بخش دسترسی دارد.",
-                "show_alert": false
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات به این بخش دسترسی دارد.",
+                  "show_alert": false
+                }
               }
             }
           ]
@@ -10174,10 +10544,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -10185,135 +10557,54 @@ export default {
               "as": "queueStats"
             },
             {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{callback.message.chat.id}}",
-                "message_id": "{{callback.message.message_id}}",
-                "text": "<b>◈ MUNITOS QUEUE</b>\n━━━━━━━━━━━━━━━━━━\nدر انتظار: <b>{{queueStats.pending}}</b>\nدر حال اجرا: <b>{{queueStats.running}}</b>\nناموفق: <b>{{queueStats.failed}}</b>",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
-                },
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "🔄 تازه‌سازی",
-                        "callback_data": "ui:owner:queue",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "📊 وضعیت سیستم",
-                        "callback_data": "ui:owner:status",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "⬅️ پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
+              "type": "api.call",
+              "api": "telegram.editMessageText",
+              "input": {
+                "payload": {
+                  "chat_id": "{{callback.message.chat.id}}",
+                  "message_id": "{{callback.message.message_id}}",
+                  "text": "<b>◈ MUNITOS QUEUE</b>\n━━━━━━━━━━━━━━━━━━\nدر انتظار: <b>{{queueStats.pending}}</b>\nدر حال اجرا: <b>{{queueStats.running}}</b>\nناموفق: <b>{{queueStats.failed}}</b>",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  },
+                  "reply_markup": {
+                    "inline_keyboard": [
+                      [
+                        {
+                          "text": "🔄 تازه‌سازی",
+                          "callback_data": "ui:owner:queue",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "📊 وضعیت سیستم",
+                          "callback_data": "ui:owner:status",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "⬅️ پنل مدیریت",
+                          "callback_data": "ui:owner:home",
+                          "style": "primary"
+                        }
+                      ]
                     ]
-                  ]
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات به این بخش دسترسی دارد.",
-                "show_alert": false
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "ui.owner.logs",
-      "module": "owner_management",
-      "on": "callback_query",
-      "match": {
-        "callbackPrefix": "ui:owner:logs"
-      },
-      "actions": [
-        {
-          "type": "workflow.run",
-          "workflow": "forcejoin.check",
-          "input": {}
-        },
-        {
-          "type": "condition",
-          "if": {
-            "eq": [
-              "{{owner.isOwner}}",
-              true
-            ]
-          },
-          "then": [
-            {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
-              }
-            },
-            {
-              "type": "runtime.logs",
-              "limit": 10,
-              "as": "logs"
-            },
-            {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{callback.message.chat.id}}",
-                "message_id": "{{callback.message.message_id}}",
-                "text": "<b>◈ MUNITOS LOGS</b>\n━━━━━━━━━━━━━━━━━━\n<code>{{logs}}</code>",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
-                },
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "🔄 تازه‌سازی",
-                        "callback_data": "ui:owner:logs",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "📊 وضعیت سیستم",
-                        "callback_data": "ui:owner:status",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "⬅️ پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
-                    ]
-                  ]
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات به این بخش دسترسی دارد.",
+                  "show_alert": false
                 }
-              }
-            }
-          ],
-          "else": [
-            {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات به این بخش دسترسی دارد.",
-                "show_alert": false
               }
             }
           ]
@@ -10343,10 +10634,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -10355,50 +10648,54 @@ export default {
               "reason": "owner panel"
             },
             {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{callback.message.chat.id}}",
-                "message_id": "{{callback.message.message_id}}",
-                "text": "⏸ صف و زمان‌بندی‌های پس‌زمینه متوقف شدند.\nدریافت و پردازش فرمان‌های ورودی ادامه دارد.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
-                },
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "🧾 وضعیت صف",
-                        "callback_data": "ui:owner:queue",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "📊 وضعیت سیستم",
-                        "callback_data": "ui:owner:status",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "⬅️ پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
+              "type": "api.call",
+              "api": "telegram.editMessageText",
+              "input": {
+                "payload": {
+                  "chat_id": "{{callback.message.chat.id}}",
+                  "message_id": "{{callback.message.message_id}}",
+                  "text": "⏸ صف و زمان‌بندی‌های پس‌زمینه متوقف شدند.\nدریافت و پردازش فرمان‌های ورودی ادامه دارد.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  },
+                  "reply_markup": {
+                    "inline_keyboard": [
+                      [
+                        {
+                          "text": "🧾 وضعیت صف",
+                          "callback_data": "ui:owner:queue",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "📊 وضعیت سیستم",
+                          "callback_data": "ui:owner:status",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "⬅️ پنل مدیریت",
+                          "callback_data": "ui:owner:home",
+                          "style": "primary"
+                        }
+                      ]
                     ]
-                  ]
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات به این بخش دسترسی دارد.",
-                "show_alert": false
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات به این بخش دسترسی دارد.",
+                  "show_alert": false
+                }
               }
             }
           ]
@@ -10428,10 +10725,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -10439,50 +10738,54 @@ export default {
               "operation": "resume"
             },
             {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{callback.message.chat.id}}",
-                "message_id": "{{callback.message.message_id}}",
-                "text": "▶️ پردازش صف و زمان‌بندی‌های پس‌زمینه دوباره فعال شد.",
-                "parse_mode": "HTML",
-                "link_preview_options": {
-                  "is_disabled": true
-                },
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "🧾 وضعیت صف",
-                        "callback_data": "ui:owner:queue",
-                        "style": "primary"
-                      },
-                      {
-                        "text": "📊 وضعیت سیستم",
-                        "callback_data": "ui:owner:status",
-                        "style": "primary"
-                      }
-                    ],
-                    [
-                      {
-                        "text": "⬅️ پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
+              "type": "api.call",
+              "api": "telegram.editMessageText",
+              "input": {
+                "payload": {
+                  "chat_id": "{{callback.message.chat.id}}",
+                  "message_id": "{{callback.message.message_id}}",
+                  "text": "▶️ پردازش صف و زمان‌بندی‌های پس‌زمینه دوباره فعال شد.",
+                  "parse_mode": "HTML",
+                  "link_preview_options": {
+                    "is_disabled": true
+                  },
+                  "reply_markup": {
+                    "inline_keyboard": [
+                      [
+                        {
+                          "text": "🧾 وضعیت صف",
+                          "callback_data": "ui:owner:queue",
+                          "style": "primary"
+                        },
+                        {
+                          "text": "📊 وضعیت سیستم",
+                          "callback_data": "ui:owner:status",
+                          "style": "primary"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "⬅️ پنل مدیریت",
+                          "callback_data": "ui:owner:home",
+                          "style": "primary"
+                        }
+                      ]
                     ]
-                  ]
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات به این بخش دسترسی دارد.",
-                "show_alert": false
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات به این بخش دسترسی دارد.",
+                  "show_alert": false
+                }
               }
             }
           ]
@@ -10530,10 +10833,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -10567,11 +10872,13 @@ export default {
                   }
                 },
                 {
-                  "type": "telegram.call",
-                  "method": "sendMessage",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "text": "✉️ پیام یا رسانه موردنظر برای این مقصد را بفرست. پیش از ارسال، پیش‌نمایش برای تأیید نمایش داده می‌شود."
+                  "type": "api.call",
+                  "api": "telegram.sendMessage",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "text": "✉️ پیام یا رسانه موردنظر برای این مقصد را بفرست. پیش از ارسال، پیش‌نمایش برای تأیید نمایش داده می‌شود."
+                    }
                   }
                 }
               ],
@@ -10741,12 +11048,14 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات به این بخش دسترسی دارد.",
-                "show_alert": true
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات به این بخش دسترسی دارد.",
+                  "show_alert": true
+                }
               }
             }
           ]
@@ -10782,13 +11091,15 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "getChatMember",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "user_id": "{{user.id}}"
-                  },
-                  "as": "actorStatus"
+                  "type": "api.call",
+                  "as": "actorStatus",
+                  "api": "telegram.getChatMember",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "user_id": "{{user.id}}"
+                    }
+                  }
                 }
               ],
               "catch": [
@@ -10836,29 +11147,33 @@ export default {
                       "value": false
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "answerCallbackQuery",
-                      "payload": {
-                        "callback_query_id": "{{callback.id}}",
-                        "text": "خوش‌آمدگویی خاموش شد."
+                      "type": "api.call",
+                      "api": "telegram.answerCallbackQuery",
+                      "input": {
+                        "payload": {
+                          "callback_query_id": "{{callback.id}}",
+                          "text": "خوش‌آمدگویی خاموش شد."
+                        }
                       }
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "editMessageText",
-                      "payload": {
-                        "chat_id": "{{callback.message.chat.id}}",
-                        "message_id": "{{callback.message.message_id}}",
-                        "text": "{{runtime.app.ui.sections.welcome.groupDisabledText}}",
-                        "parse_mode": "HTML",
-                        "link_preview_options": {
-                          "is_disabled": true
-                        },
-                        "reply_markup": {
-                          "inline_keyboard": {
-                            "$expr": {
-                              "op": "get",
-                              "path": "runtime.app.ui.sections.welcome.groupDisabledKeyboard"
+                      "type": "api.call",
+                      "api": "telegram.editMessageText",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{callback.message.chat.id}}",
+                          "message_id": "{{callback.message.message_id}}",
+                          "text": "{{runtime.app.ui.sections.welcome.groupDisabledText}}",
+                          "parse_mode": "HTML",
+                          "link_preview_options": {
+                            "is_disabled": true
+                          },
+                          "reply_markup": {
+                            "inline_keyboard": {
+                              "$expr": {
+                                "op": "get",
+                                "path": "runtime.app.ui.sections.welcome.groupDisabledKeyboard"
+                              }
                             }
                           }
                         }
@@ -10873,29 +11188,33 @@ export default {
                       "value": true
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "answerCallbackQuery",
-                      "payload": {
-                        "callback_query_id": "{{callback.id}}",
-                        "text": "خوش‌آمدگویی روشن شد."
+                      "type": "api.call",
+                      "api": "telegram.answerCallbackQuery",
+                      "input": {
+                        "payload": {
+                          "callback_query_id": "{{callback.id}}",
+                          "text": "خوش‌آمدگویی روشن شد."
+                        }
                       }
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "editMessageText",
-                      "payload": {
-                        "chat_id": "{{callback.message.chat.id}}",
-                        "message_id": "{{callback.message.message_id}}",
-                        "text": "{{runtime.app.ui.sections.welcome.groupEnabledText}}",
-                        "parse_mode": "HTML",
-                        "link_preview_options": {
-                          "is_disabled": true
-                        },
-                        "reply_markup": {
-                          "inline_keyboard": {
-                            "$expr": {
-                              "op": "get",
-                              "path": "runtime.app.ui.sections.welcome.groupEnabledKeyboard"
+                      "type": "api.call",
+                      "api": "telegram.editMessageText",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{callback.message.chat.id}}",
+                          "message_id": "{{callback.message.message_id}}",
+                          "text": "{{runtime.app.ui.sections.welcome.groupEnabledText}}",
+                          "parse_mode": "HTML",
+                          "link_preview_options": {
+                            "is_disabled": true
+                          },
+                          "reply_markup": {
+                            "inline_keyboard": {
+                              "$expr": {
+                                "op": "get",
+                                "path": "runtime.app.ui.sections.welcome.groupEnabledKeyboard"
+                              }
                             }
                           }
                         }
@@ -10906,12 +11225,14 @@ export default {
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "answerCallbackQuery",
-                  "payload": {
-                    "callback_query_id": "{{callback.id}}",
-                    "text": "این دکمه فقط برای مالک یا مدیر واقعی گروه فعال است.",
-                    "show_alert": true
+                  "type": "api.call",
+                  "api": "telegram.answerCallbackQuery",
+                  "input": {
+                    "payload": {
+                      "callback_query_id": "{{callback.id}}",
+                      "text": "این دکمه فقط برای مالک یا مدیر واقعی گروه فعال است.",
+                      "show_alert": true
+                    }
                   }
                 }
               ]
@@ -10919,12 +11240,14 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "این گزینه فقط در گروه قابل استفاده است.",
-                "show_alert": true
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "این گزینه فقط در گروه قابل استفاده است.",
+                  "show_alert": true
+                }
               }
             }
           ]
@@ -10960,13 +11283,15 @@ export default {
               "type": "try",
               "actions": [
                 {
-                  "type": "telegram.call",
-                  "method": "getChatMember",
-                  "payload": {
-                    "chat_id": "{{chat.id}}",
-                    "user_id": "{{user.id}}"
-                  },
-                  "as": "actorStatus"
+                  "type": "api.call",
+                  "as": "actorStatus",
+                  "api": "telegram.getChatMember",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{chat.id}}",
+                      "user_id": "{{user.id}}"
+                    }
+                  }
                 }
               ],
               "catch": [
@@ -11014,29 +11339,33 @@ export default {
                       "value": false
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "answerCallbackQuery",
-                      "payload": {
-                        "callback_query_id": "{{callback.id}}",
-                        "text": "خداحافظی خاموش شد."
+                      "type": "api.call",
+                      "api": "telegram.answerCallbackQuery",
+                      "input": {
+                        "payload": {
+                          "callback_query_id": "{{callback.id}}",
+                          "text": "خداحافظی خاموش شد."
+                        }
                       }
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "editMessageText",
-                      "payload": {
-                        "chat_id": "{{callback.message.chat.id}}",
-                        "message_id": "{{callback.message.message_id}}",
-                        "text": "{{runtime.app.ui.sections.goodbye.groupDisabledText}}",
-                        "parse_mode": "HTML",
-                        "link_preview_options": {
-                          "is_disabled": true
-                        },
-                        "reply_markup": {
-                          "inline_keyboard": {
-                            "$expr": {
-                              "op": "get",
-                              "path": "runtime.app.ui.sections.goodbye.groupDisabledKeyboard"
+                      "type": "api.call",
+                      "api": "telegram.editMessageText",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{callback.message.chat.id}}",
+                          "message_id": "{{callback.message.message_id}}",
+                          "text": "{{runtime.app.ui.sections.goodbye.groupDisabledText}}",
+                          "parse_mode": "HTML",
+                          "link_preview_options": {
+                            "is_disabled": true
+                          },
+                          "reply_markup": {
+                            "inline_keyboard": {
+                              "$expr": {
+                                "op": "get",
+                                "path": "runtime.app.ui.sections.goodbye.groupDisabledKeyboard"
+                              }
                             }
                           }
                         }
@@ -11051,29 +11380,33 @@ export default {
                       "value": true
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "answerCallbackQuery",
-                      "payload": {
-                        "callback_query_id": "{{callback.id}}",
-                        "text": "خداحافظی روشن شد."
+                      "type": "api.call",
+                      "api": "telegram.answerCallbackQuery",
+                      "input": {
+                        "payload": {
+                          "callback_query_id": "{{callback.id}}",
+                          "text": "خداحافظی روشن شد."
+                        }
                       }
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "editMessageText",
-                      "payload": {
-                        "chat_id": "{{callback.message.chat.id}}",
-                        "message_id": "{{callback.message.message_id}}",
-                        "text": "{{runtime.app.ui.sections.goodbye.groupEnabledText}}",
-                        "parse_mode": "HTML",
-                        "link_preview_options": {
-                          "is_disabled": true
-                        },
-                        "reply_markup": {
-                          "inline_keyboard": {
-                            "$expr": {
-                              "op": "get",
-                              "path": "runtime.app.ui.sections.goodbye.groupEnabledKeyboard"
+                      "type": "api.call",
+                      "api": "telegram.editMessageText",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{callback.message.chat.id}}",
+                          "message_id": "{{callback.message.message_id}}",
+                          "text": "{{runtime.app.ui.sections.goodbye.groupEnabledText}}",
+                          "parse_mode": "HTML",
+                          "link_preview_options": {
+                            "is_disabled": true
+                          },
+                          "reply_markup": {
+                            "inline_keyboard": {
+                              "$expr": {
+                                "op": "get",
+                                "path": "runtime.app.ui.sections.goodbye.groupEnabledKeyboard"
+                              }
                             }
                           }
                         }
@@ -11084,12 +11417,14 @@ export default {
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "answerCallbackQuery",
-                  "payload": {
-                    "callback_query_id": "{{callback.id}}",
-                    "text": "این دکمه فقط برای مالک یا مدیر واقعی گروه فعال است.",
-                    "show_alert": true
+                  "type": "api.call",
+                  "api": "telegram.answerCallbackQuery",
+                  "input": {
+                    "payload": {
+                      "callback_query_id": "{{callback.id}}",
+                      "text": "این دکمه فقط برای مالک یا مدیر واقعی گروه فعال است.",
+                      "show_alert": true
+                    }
                   }
                 }
               ]
@@ -11097,12 +11432,14 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "این گزینه فقط در گروه قابل استفاده است.",
-                "show_alert": true
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "این گزینه فقط در گروه قابل استفاده است.",
+                  "show_alert": true
+                }
               }
             }
           ]
@@ -11132,10 +11469,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -11146,12 +11485,14 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات می‌تواند ارسال همگانی را تأیید کند.",
-                "show_alert": true
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات می‌تواند ارسال همگانی را تأیید کند.",
+                  "show_alert": true
+                }
               }
             }
           ]
@@ -11181,10 +11522,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -11193,34 +11536,38 @@ export default {
               "key": "broadcast.pending"
             },
             {
-              "type": "telegram.call",
-              "method": "editMessageText",
-              "payload": {
-                "chat_id": "{{callback.message.chat.id}}",
-                "message_id": "{{callback.message.message_id}}",
-                "text": "✖️ ارسال همگانی لغو شد.",
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "⚙️ پنل مدیریت",
-                        "callback_data": "ui:owner:home",
-                        "style": "primary"
-                      }
+              "type": "api.call",
+              "api": "telegram.editMessageText",
+              "input": {
+                "payload": {
+                  "chat_id": "{{callback.message.chat.id}}",
+                  "message_id": "{{callback.message.message_id}}",
+                  "text": "✖️ ارسال همگانی لغو شد.",
+                  "reply_markup": {
+                    "inline_keyboard": [
+                      [
+                        {
+                          "text": "⚙️ پنل مدیریت",
+                          "callback_data": "ui:owner:home",
+                          "style": "primary"
+                        }
+                      ]
                     ]
-                  ]
+                  }
                 }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات می‌تواند این عملیات را لغو کند.",
-                "show_alert": true
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات می‌تواند این عملیات را لغو کند.",
+                  "show_alert": true
+                }
               }
             }
           ]
@@ -11284,19 +11631,23 @@ export default {
                   },
                   "then": [
                     {
-                      "type": "telegram.call",
-                      "method": "answerCallbackQuery",
-                      "payload": {
-                        "callback_query_id": "{{callback.id}}"
+                      "type": "api.call",
+                      "api": "telegram.answerCallbackQuery",
+                      "input": {
+                        "payload": {
+                          "callback_query_id": "{{callback.id}}"
+                        }
                       }
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "copyMessage",
-                      "payload": {
-                        "chat_id": "{{pendingTargetMessage.targetId}}",
-                        "from_chat_id": "{{pendingTargetMessage.sourceChatId}}",
-                        "message_id": "{{pendingTargetMessage.sourceMessageId}}"
+                      "type": "api.call",
+                      "api": "telegram.copyMessage",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{pendingTargetMessage.targetId}}",
+                          "from_chat_id": "{{pendingTargetMessage.sourceChatId}}",
+                          "message_id": "{{pendingTargetMessage.sourceMessageId}}"
+                        }
                       }
                     },
                     {
@@ -11305,34 +11656,38 @@ export default {
                       "key": "target.message.pending"
                     },
                     {
-                      "type": "telegram.call",
-                      "method": "editMessageText",
-                      "payload": {
-                        "chat_id": "{{callback.message.chat.id}}",
-                        "message_id": "{{callback.message.message_id}}",
-                        "text": "✅ پیام اختصاصی ارسال شد.",
-                        "reply_markup": {
-                          "inline_keyboard": [
-                            [
-                              {
-                                "text": "⚙️ پنل مدیریت",
-                                "callback_data": "ui:owner:home",
-                                "style": "primary"
-                              }
+                      "type": "api.call",
+                      "api": "telegram.editMessageText",
+                      "input": {
+                        "payload": {
+                          "chat_id": "{{callback.message.chat.id}}",
+                          "message_id": "{{callback.message.message_id}}",
+                          "text": "✅ پیام اختصاصی ارسال شد.",
+                          "reply_markup": {
+                            "inline_keyboard": [
+                              [
+                                {
+                                  "text": "⚙️ پنل مدیریت",
+                                  "callback_data": "ui:owner:home",
+                                  "style": "primary"
+                                }
+                              ]
                             ]
-                          ]
+                          }
                         }
                       }
                     }
                   ],
                   "else": [
                     {
-                      "type": "telegram.call",
-                      "method": "answerCallbackQuery",
-                      "payload": {
-                        "callback_query_id": "{{callback.id}}",
-                        "text": "پیش‌نمایش فعالی پیدا نشد.",
-                        "show_alert": true
+                      "type": "api.call",
+                      "api": "telegram.answerCallbackQuery",
+                      "input": {
+                        "payload": {
+                          "callback_query_id": "{{callback.id}}",
+                          "text": "پیش‌نمایش فعالی پیدا نشد.",
+                          "show_alert": true
+                        }
                       }
                     }
                   ]
@@ -11340,10 +11695,12 @@ export default {
               ],
               "else": [
                 {
-                  "type": "telegram.call",
-                  "method": "answerCallbackQuery",
-                  "payload": {
-                    "callback_query_id": "{{callback.id}}"
+                  "type": "api.call",
+                  "api": "telegram.answerCallbackQuery",
+                  "input": {
+                    "payload": {
+                      "callback_query_id": "{{callback.id}}"
+                    }
                   }
                 },
                 {
@@ -11352,22 +11709,24 @@ export default {
                   "key": "target.message.pending"
                 },
                 {
-                  "type": "telegram.call",
-                  "method": "editMessageText",
-                  "payload": {
-                    "chat_id": "{{callback.message.chat.id}}",
-                    "message_id": "{{callback.message.message_id}}",
-                    "text": "✖️ ارسال پیام اختصاصی لغو شد.",
-                    "reply_markup": {
-                      "inline_keyboard": [
-                        [
-                          {
-                            "text": "⚙️ پنل مدیریت",
-                            "callback_data": "ui:owner:home",
-                            "style": "primary"
-                          }
+                  "type": "api.call",
+                  "api": "telegram.editMessageText",
+                  "input": {
+                    "payload": {
+                      "chat_id": "{{callback.message.chat.id}}",
+                      "message_id": "{{callback.message.message_id}}",
+                      "text": "✖️ ارسال پیام اختصاصی لغو شد.",
+                      "reply_markup": {
+                        "inline_keyboard": [
+                          [
+                            {
+                              "text": "⚙️ پنل مدیریت",
+                              "callback_data": "ui:owner:home",
+                              "style": "primary"
+                            }
+                          ]
                         ]
-                      ]
+                      }
                     }
                   }
                 }
@@ -11376,12 +11735,14 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات می‌تواند این عملیات را انجام دهد.",
-                "show_alert": true
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات می‌تواند این عملیات را انجام دهد.",
+                  "show_alert": true
+                }
               }
             }
           ]
@@ -11410,10 +11771,12 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}"
+                }
               }
             },
             {
@@ -11423,59 +11786,14 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "این بخش فقط برای مالک ربات فعال است.",
-                "show_alert": true
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "ui.owner.repair",
-      "on": "callback_query",
-      "match": {
-        "callbackPrefix": "ui:owner:repair"
-      },
-      "actions": [
-        {
-          "type": "workflow.run",
-          "workflow": "forcejoin.check",
-          "input": {}
-        },
-        {
-          "type": "condition",
-          "if": {
-            "eq": [
-              "{{owner.isOwner}}",
-              true
-            ]
-          },
-          "then": [
-            {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}"
-              }
-            },
-            {
-              "type": "workflow.run",
-              "workflow": "system.autorepair"
-            }
-          ],
-          "else": [
-            {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "این بخش فقط برای مالک ربات فعال است.",
-                "show_alert": true
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "این بخش فقط برای مالک ربات فعال است.",
+                  "show_alert": true
+                }
               }
             }
           ]
@@ -11505,11 +11823,13 @@ export default {
           },
           "then": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "بررسی مقصد به صف اضافه شد."
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "بررسی مقصد به صف اضافه شد."
+                }
               }
             },
             {
@@ -11536,22 +11856,26 @@ export default {
               "maxAttempts": 4
             },
             {
-              "type": "telegram.call",
-              "method": "sendMessage",
-              "payload": {
-                "chat_id": "{{chat.id}}",
-                "text": "🔍 بررسی مجدد عضویت و دسترسی مقصد در صف قرار گرفت."
+              "type": "api.call",
+              "api": "telegram.sendMessage",
+              "input": {
+                "payload": {
+                  "chat_id": "{{chat.id}}",
+                  "text": "🔍 بررسی مجدد عضویت و دسترسی مقصد در صف قرار گرفت."
+                }
               }
             }
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک ربات به این بخش دسترسی دارد.",
-                "show_alert": true
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک ربات به این بخش دسترسی دارد.",
+                  "show_alert": true
+                }
               }
             }
           ]
@@ -11567,10 +11891,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -11590,12 +11916,14 @@ export default {
           ],
           "else": [
             {
-              "type": "telegram.call",
-              "method": "answerCallbackQuery",
-              "payload": {
-                "callback_query_id": "{{callback.id}}",
-                "text": "فقط مالک دسترسی دارد.",
-                "show_alert": true
+              "type": "api.call",
+              "api": "telegram.answerCallbackQuery",
+              "input": {
+                "payload": {
+                  "callback_query_id": "{{callback.id}}",
+                  "text": "فقط مالک دسترسی دارد.",
+                  "show_alert": true
+                }
               }
             }
           ]
@@ -11611,10 +11939,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -11670,10 +12000,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -11729,10 +12061,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -11788,10 +12122,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -11820,10 +12156,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -11832,14 +12170,16 @@ export default {
           "input": {}
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>مدیریت اعضا</b>\nبرای سکوت: روی پیام کاربر ریپلای و <code>/mute</code> ارسال کنید.\nبرای رفع سکوت: <code>/unmute</code>\nبرای بن: <code>/ban</code>\nبرای رفع بن: <code>/unban</code>\nفهرست‌ها: <code>/silentlist</code> و <code>/banlist</code>\nپاک‌سازی: <code>/cleansilentlist</code> و <code>/cleanbanlist</code>\n\nبرای عملیات محدودسازی، شما و ربات باید مجوز <code>Restrict Members</code> داشته باشید.",
-            "parse_mode": "HTML",
-            "link_preview_options": {
-              "is_disabled": true
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>مدیریت اعضا</b>\nبرای سکوت: روی پیام کاربر ریپلای و <code>/mute</code> ارسال کنید.\nبرای رفع سکوت: <code>/unmute</code>\nبرای بن: <code>/ban</code>\nبرای رفع بن: <code>/unban</code>\nفهرست‌ها: <code>/silentlist</code> و <code>/banlist</code>\nپاک‌سازی: <code>/cleansilentlist</code> و <code>/cleanbanlist</code>\n\nبرای عملیات محدودسازی، شما و ربات باید مجوز <code>Restrict Members</code> داشته باشید.",
+              "parse_mode": "HTML",
+              "link_preview_options": {
+                "is_disabled": true
+              }
             }
           }
         }
@@ -11860,10 +12200,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -11887,10 +12229,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -11924,12 +12268,14 @@ export default {
           "key": "goodbye.source"
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>پیام‌های خوش‌آمد و خداحافظی به مقادیر پیش‌فرض برگشتند.</b>",
-            "parse_mode": "HTML"
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>پیام‌های خوش‌آمد و خداحافظی به مقادیر پیش‌فرض برگشتند.</b>",
+              "parse_mode": "HTML"
+            }
           }
         },
         {
@@ -11948,10 +12294,12 @@ export default {
       },
       "actions": [
         {
-          "type": "telegram.call",
-          "method": "answerCallbackQuery",
-          "payload": {
-            "callback_query_id": "{{callback.id}}"
+          "type": "api.call",
+          "api": "telegram.answerCallbackQuery",
+          "input": {
+            "payload": {
+              "callback_query_id": "{{callback.id}}"
+            }
           }
         },
         {
@@ -11976,12 +12324,14 @@ export default {
           "value": false
         },
         {
-          "type": "telegram.call",
-          "method": "sendMessage",
-          "payload": {
-            "chat_id": "{{chat.id}}",
-            "text": "<b>پیام ورود ربات به مقدار پیش‌فرض بازنشانی شد.</b>",
-            "parse_mode": "HTML"
+          "type": "api.call",
+          "api": "telegram.sendMessage",
+          "input": {
+            "payload": {
+              "chat_id": "{{chat.id}}",
+              "text": "<b>پیام ورود ربات به مقدار پیش‌فرض بازنشانی شد.</b>",
+              "parse_mode": "HTML"
+            }
           }
         },
         {
@@ -11992,26 +12342,19 @@ export default {
       ]
     }
   ],
-  "schedules": [
-    {
-      "id": "system.reconcile.telegram",
-      "cron": "0 */6 * * *",
-      "workflow": "system.reconcile",
-      "enabled": true
-    }
-  ],
+  "schedules": [],
   "lifecycle": {
     "onBootstrap": [
       {
         "type": "workflow.run",
-        "workflow": "system.reconcile",
+        "workflow": "system.initialize",
         "input": {}
       }
     ],
     "onInstall": [
       {
         "type": "workflow.run",
-        "workflow": "system.reconcile",
+        "workflow": "system.initialize",
         "input": {}
       }
     ]
@@ -12052,7 +12395,9 @@ export default {
       },
       "menuExpiry": {
         "admin": "منوی ادمین به‌صورت خودکار پس از ۱۰ دقیقه بلااستفاده بودن بسته شد.\nبرای بازکردن دوباره، دستور /admin یا /group را ارسال کنید.",
-        "user": "منوی یوزر به‌صورت خودکار پس از ۱۰ دقیقه بلااستفاده بودن بسته شد.\nبرای بازکردن دوباره، دستور /start را ارسال کنید."
+        "user": "منوی یوزر به‌صورت خودکار پس از ۱۰ دقیقه بلااستفاده بودن بسته شد.\nبرای بازکردن دوباره، دستور /start را ارسال کنید.",
+        "owner": "منوی مالک پس از ۱۰ دقیقه بلااستفاده بودن بسته شد.",
+        "groupAdmin": "منوی مدیر پس از ۱۰ دقیقه بلااستفاده بودن بسته شد."
       },
       "menuSecurity": {
         "invalid": "اطلاعات این منو معتبر نیست. دوباره منو را باز کنید.",
@@ -12062,6 +12407,17 @@ export default {
         "groupAdminOnly": "دسترسی مدیر گروه برای شما تأیید نشد. پنل فقط برای مدیر واقعی گروه فعال است.",
         "inactive": "زمان این منو به پایان رسیده است. دوباره منو را باز کنید.",
         "ownerTargetsOnly": "فقط مالک ربات به این بخش دسترسی دارد."
+      },
+      "commandDenied": "اجازه اجرای این فرمان را نداری.",
+      "installer": {
+        "ownerOnly": "این دستور فقط برای مالک و در گفتگوی خصوصی فعال است.",
+        "request": "فایل <code>database.js</code> را به‌صورت Document ارسال کن. فقط ساختار داده‌ای مجاز است؛ کد اجرایی پذیرفته نمی‌شود.",
+        "fileName": "نام فایل باید دقیقاً database.js باشد. دوباره /install را اجرا کن.",
+        "fileTooLarge": "حجم دیتابیس از حد مجاز بیشتر است.",
+        "invalid": "نصب انجام نشد. دیتابیس فعلی تغییر نکرد.\nخطا: {{code}}",
+        "migrationBlocked": "نصب انجام نشد؛ یک وظیفه یا مکالمه فعال به Workflow حذف‌شده وابسته است. دیتابیس فعلی دست‌نخورده ماند.\n{{code}}",
+        "lifecycleWarning": "\nتنظیمات اولیه نیاز به بررسی دارد: {{error}}",
+        "installed": "دیتابیس MUNITOS نصب شد.\nنسخه: {{version}}\nSHA-256: <code>{{hash}}</code>\nفرمان‌ها: {{commands}}\nWorkflowها: {{workflows}}\nAPIها: {{apis}}{{extra}}"
       }
     },
     "home": {
@@ -12106,11 +12462,6 @@ export default {
           ],
           [
             {
-              "text": "🛠 ترمیم خودکار",
-              "callback_data": "ui:owner:repair",
-              "style": "success"
-            },
-            {
               "text": "🔎 شناسایی مقصد",
               "callback_data": "ui:owner:detect",
               "style": "primary"
@@ -12151,11 +12502,6 @@ export default {
             {
               "text": "🧾 صف پردازش",
               "callback_data": "ui:owner:queue",
-              "style": "primary"
-            },
-            {
-              "text": "📜 گزارش‌ها",
-              "callback_data": "ui:owner:logs",
               "style": "primary"
             }
           ]
@@ -12418,11 +12764,6 @@ export default {
             "text": "🔎 شناسایی گروه و کانال",
             "callback_data": "ui:section:detection",
             "style": "primary"
-          },
-          {
-            "text": "🛠 ترمیم خودکار",
-            "callback_data": "ui:owner:repair",
-            "style": "success"
           }
         ],
         [
@@ -12583,13 +12924,6 @@ export default {
           ],
           [
             {
-              "text": "🛠 ترمیم خودکار سیستم",
-              "callback_data": "ui:owner:repair",
-              "style": "success"
-            }
-          ],
-          [
-            {
               "text": "📢 پیام همگانی",
               "callback_data": "ui:owner:broadcast",
               "style": "primary"
@@ -12604,13 +12938,6 @@ export default {
             {
               "text": "🧾 وضعیت صف",
               "callback_data": "ui:owner:queue",
-              "style": "primary"
-            }
-          ],
-          [
-            {
-              "text": "📜 گزارش‌های اخیر",
-              "callback_data": "ui:owner:logs",
               "style": "primary"
             }
           ],
@@ -13104,7 +13431,7 @@ export default {
       },
       "owner": {
         "title": "⚙️ ابزارهای مالک",
-        "text": "<b>ابزارهای مالک</b>\n\nفهرست گروه‌ها و کانال‌ها، شناسایی مقصد، عضویت اجباری کاربران خصوصی، پیام همگانی، پلن‌ها و Auto Repair از پنل خصوصی مالک مدیریت می‌شوند.",
+        "text": "<b>ابزارهای مالک</b>\n\nفهرست گروه‌ها و کانال‌ها، شناسایی مقصد، عضویت اجباری کاربران خصوصی، پیام همگانی و مدیریت صف از پنل خصوصی مالک مدیریت می‌شوند.",
         "keyboard": [
           [
             {
@@ -13118,11 +13445,6 @@ export default {
               "text": "🔎 شناسایی هوشمند",
               "callback_data": "ui:owner:detect",
               "style": "primary"
-            },
-            {
-              "text": "🛠 Auto Repair",
-              "callback_data": "ui:owner:repair",
-              "style": "success"
             }
           ],
           [
@@ -13155,19 +13477,12 @@ export default {
               "callback_data": "ui:home",
               "style": "primary"
             }
-          ],
-          [
-            {
-              "text": "📚 راهنمای Auto Repair",
-              "callback_data": "ui:cmd:repair",
-              "style": "success"
-            }
           ]
         ]
       },
       "runtime": {
         "title": "🧠 وضعیت Runtime",
-        "text": "<b>وضعیت Runtime</b>\n\nوضعیت موتور، صف پردازش و گزارش خطاها از پنل مالک قابل مشاهده است. توقف Runtime فقط پردازش‌های زمان‌بندی‌شده و صف پس‌زمینه را متوقف می‌کند؛ دریافت فرمان‌ها ادامه دارد.",
+        "text": "<b>وضعیت Runtime</b>\n\nوضعیت موتور و صف پردازش از پنل مالک قابل مشاهده است. توقف Runtime فقط پردازش‌های زمان‌بندی‌شده و صف پس‌زمینه را متوقف می‌کند؛ دریافت فرمان‌ها ادامه دارد.",
         "keyboard": [
           [
             {
@@ -13178,13 +13493,6 @@ export default {
             {
               "text": "🧾 وضعیت صف",
               "callback_data": "ui:cmd:runtime_queue",
-              "style": "primary"
-            }
-          ],
-          [
-            {
-              "text": "📜 گزارش‌های اخیر",
-              "callback_data": "ui:cmd:runtime_logs",
               "style": "primary"
             }
           ],
@@ -13228,7 +13536,7 @@ export default {
       },
       "features": {
         "title": "🧩 امکانات MUNITOS",
-        "text": "<b>امکانات فعال MUNITOS</b>\n\n🛡 <b>مدیریت اعضا</b>\nسکوت، رفع سکوت، بن و رفع بن با ریپلای و کنترل مجوزهای مدیر و ربات.\n\n👋 <b>خوش‌آمد و خداحافظی</b>\nتنظیم متن، رسانه، قالب‌بندی و زمان تأخیر برای هر گروه.\n\n🗂 <b>مدیریت و شناسایی مقصد</b>\nثبت خودکار، انتخاب رسمی گروه و کانال، تشخیص شناسه و یوزرنیم، بررسی عضویت و مجوز ارسال.\n\n🔐 <b>عضویت اجباری</b>\nفهرست مستقل برای هر گروه و فهرست سراسری برای کاربران خصوصی.\n\n🛠 <b>Auto Repair</b>\nبررسی تنظیمات Telegram، Webhook، صف و مقصدهای ثبت‌شده.\n\n📢 <b>پیام همگانی</b>\nصف ارسال به مقصدهای ثبت‌شده همراه با کنترل سهمیه.\n\n📊 <b>پلن و سهمیه</b>\nسهمیه ماهانه و تنظیم پلن اختصاصی مقصد.\n\n⚙️ <b>پنل‌های مدیریتی</b>\nپنل گروه فقط برای مدیران واقعی و پنل مالک فقط در گفتگوی خصوصی مالک.",
+        "text": "<b>امکانات فعال MUNITOS</b>\n\n🛡 <b>مدیریت اعضا</b>\nسکوت، رفع سکوت، بن و رفع بن با ریپلای و کنترل مجوزهای مدیر و ربات.\n\n👋 <b>خوش‌آمد و خداحافظی</b>\nتنظیم متن، رسانه، قالب‌بندی و زمان تأخیر برای هر گروه.\n\n🗂 <b>مدیریت و شناسایی مقصد</b>\nثبت خودکار، انتخاب رسمی گروه و کانال، تشخیص شناسه و یوزرنیم، بررسی عضویت و مجوز ارسال.\n\n🔐 <b>عضویت اجباری</b>\nفهرست مستقل برای هر گروه و فهرست سراسری برای کاربران خصوصی.\n\n📢 <b>پیام همگانی</b>\nصف ارسال به مقصدهای ثبت‌شده همراه با کنترل سهمیه.\n\n📊 <b>پلن و سهمیه</b>\nسهمیه ماهانه و تنظیم پلن اختصاصی مقصد.\n\n⚙️ <b>پنل‌های مدیریتی</b>\nپنل گروه فقط برای مدیران واقعی و پنل مالک فقط در گفتگوی خصوصی مالک.",
         "keyboard": [
           [
             {
@@ -13259,11 +13567,6 @@ export default {
               "text": "🔎 شناسایی گروه و کانال",
               "callback_data": "ui:section:detection",
               "style": "primary"
-            },
-            {
-              "text": "🛠 Auto Repair",
-              "callback_data": "ui:owner:repair",
-              "style": "success"
             }
           ],
           [
@@ -13517,14 +13820,6 @@ export default {
         "triggerText": "/runtime",
         "scopeText": "گفتگوی خصوصی"
       },
-      "runtime_logs": {
-        "title": "📜 گزارش‌های Runtime",
-        "description": "آخرین گزارش‌های خطا و رویدادهای موتور را نمایش می‌دهد.",
-        "usage": "/runtime_logs",
-        "section": "runtime",
-        "triggerText": "/runtime_logs",
-        "scopeText": "گفتگوی خصوصی"
-      },
       "runtime_queue": {
         "title": "🧾 وضعیت صف",
         "description": "تعداد Jobهای در انتظار، ناموفق و در حال اجرا را نمایش می‌دهد.",
@@ -13599,7 +13894,7 @@ export default {
       },
       "runtime_retry": {
         "title": "🔁 تلاش مجدد Job",
-        "description": "یک Job ناموفق را دوباره وارد صف اجرا می‌کند. شناسه Job باید از صفحه صف یا گزارش‌ها برداشته شود.",
+        "description": "یک Job ناموفق را دوباره وارد صف اجرا می‌کند. شناسه Job باید از صفحه صف یا  برداشته شود.",
         "usage": "/runtime_retry JOB_ID",
         "section": "runtime",
         "triggerText": "/runtime_retry",
@@ -13636,14 +13931,6 @@ export default {
         "usage": "/detectshare سپس انتخاب گروه یا کانال از صفحه تلگرام.",
         "scopeText": "خصوصی · فقط مالک",
         "section": "detection"
-      },
-      "repair": {
-        "title": "🛠 ترمیم خودکار",
-        "description": "فعال‌سازی مجدد صف، بازاعمال اطلاعات ربات و Webhook و قراردادن مقصدهای ثبت‌شده در صف بررسی مجدد دسترسی‌ها.",
-        "triggerText": "/repair · /autorepair · ترمیم خودکار",
-        "usage": "/repair سپس مشاهده نتیجه در پنل صف و فهرست مقصدها.",
-        "scopeText": "خصوصی · فقط مالک",
-        "section": "owner"
       },
       "setwelcomemedia": {
         "title": "🖼 تنظیم رسانه خوش‌آمد",
@@ -13844,6 +14131,29 @@ export default {
       "install": "<b>MUNITOS به گروه اضافه شد.</b>\nبرای مشاهده راهنمای مدیریت، <code>/group</code> را اجرا کنید.",
       "welcome": "<b>سلام !mention عزیز!</b>\nبه گروه <b>!groupname</b> خوش اومدی !emoji\n\nامیدواریم کنارمون لحظات خوبی داشته باشی.",
       "goodbye": "👋 <b>خدانگهدار !mention</b>\nامیدواریم دوباره ببینیمت."
+    }
+  },
+  "credentials": {
+    "ownerId": "8621035125",
+    "telegramBotToken": "9100041417:AAHYOpFKKTGpBQpdTAHOuTAExwZYzlXPqOtSjg",
+    "webhookSecret": "awrODtZwQiIh_wXofoQjLdpaohVaxIZvCRp0Y2b4at-Y2mXR-JxMD8DNxqaqhgPh",
+    "integrations": {}
+  },
+  "runtime": {
+    "engineVersion": "8.1.0",
+    "durableObjectName": "munitos-primary",
+    "menuIdleSeconds": 600,
+    "installSessionSeconds": 600,
+    "limits": {
+      "maxUpdateBytes": 2000000,
+      "maxDatabaseBytes": 1500000,
+      "maxHttpBodyBytes": 1048576,
+      "maxStateValueBytes": 512000,
+      "maxQueueInputBytes": 256000
+    },
+    "telegram": {
+      "apiBase": "https://api.telegram.org/bot",
+      "fileBase": "https://api.telegram.org/file/bot"
     }
   }
 };

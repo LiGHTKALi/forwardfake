@@ -12,20 +12,7 @@ import {
   validateDatabase,
 } from "./engine.js";
 
-const RUNTIME_VERSION = "8.0.6";
-const DURABLE_OBJECT_NAME = "munitos-primary";
-
-const DEFAULT_OWNER_TELEGRAM_ID = "8621035125";
-const MENU_IDLE_SECONDS = 600;
-
-const MAX_UPDATE_BYTES = 2_000_000;
-const MAX_DATABASE_BYTES = 1_500_000;
-const MAX_HTTP_BODY_BYTES = 1_048_576;
-const INSTALL_SESSION_SECONDS = 600;
-const MAX_STATE_VALUE_BYTES = 512_000;
-const MAX_QUEUE_INPUT_BYTES = 256_000;
-const TELEGRAM_API_BASE = "https://api.telegram.org/bot";
-const TELEGRAM_FILE_BASE = "https://api.telegram.org/file/bot";
+const DURABLE_OBJECT_NAME = String(DEFAULT_DATABASE.runtime?.durableObjectName || "munitos-primary");
 
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -50,10 +37,13 @@ function collectCallbackData(markup) {
   return keyboard.flatMap((row) => Array.isArray(row) ? row.map((button) => String(button?.callback_data || "")) : []);
 }
 
-function detectMenuType(context, markup) {
+function detectMenuType(context, markup, database) {
   const data = collectCallbackData(markup);
+  const classification = database?.menus?.classification || {};
+  const startsWithAny = (value, prefixes) => Array.isArray(prefixes) && prefixes.some((prefix) => value.startsWith(String(prefix)));
   if (context.chat?.type === "private" && context.owner?.isOwner) return "owner";
-  if (["group", "supergroup"].includes(context.chat?.type) && data.some((value) => value.startsWith("group:"))) return "groupAdmin";
+  if (["group", "supergroup"].includes(context.chat?.type)
+    && data.some((value) => startsWithAny(value, classification.groupAdminCallbackPrefixes || ["group:"]))) return "groupAdmin";
   if (["group", "supergroup"].includes(context.chat?.type)) return "groupMember";
   return "user";
 }
@@ -79,6 +69,17 @@ function utf8Size(value) {
 
 function randomId() {
   return crypto.randomUUID();
+}
+function versionIsOlder(candidate, reference) {
+  const parse = (value) => (String(value || "0").match(/\d+/g) || []).slice(0, 3).map(Number);
+  const left = parse(candidate);
+  const right = parse(reference);
+  for (let i = 0; i < 3; i++) {
+    const a = left[i] || 0;
+    const b = right[i] || 0;
+    if (a !== b) return a < b;
+  }
+  return false;
 }
 
 function sha256Hex(value) {
@@ -118,9 +119,9 @@ function isPrivateOrGroupScope(expected, actualChatType) {
   return expected === actualChatType;
 }
 
-function safeSqlJson(value) {
+function safeSqlJson(value, maxBytes = 512_000) {
   const serialized = JSON.stringify(value ?? null);
-  if (utf8Size(serialized) > MAX_STATE_VALUE_BYTES) throw new Error("state_value_too_large");
+  if (utf8Size(serialized) > maxBytes) throw new Error("state_value_too_large");
   return serialized;
 }
 
@@ -206,8 +207,6 @@ export class MunitosRuntime extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.ctx = ctx;
-    this.env = env;
-    this.ownerId = String(env.OWNER_TELEGRAM_ID || DEFAULT_OWNER_TELEGRAM_ID);
     this.sql = ctx.storage.sql;
     this.databaseCache = null;
     this.telegramNextAt = 0;
@@ -301,28 +300,77 @@ export class MunitosRuntime extends DurableObject {
   loadDatabase() {
     if (this.databaseCache) return this.databaseCache;
     const row = this.sql.exec("SELECT source FROM application_config WHERE id = 1").toArray()[0];
-    if (!row?.source) return DEFAULT_DATABASE;
-    const database = parseJson(row.source, null);
-    if (!database) throw new Error("active_database_corrupt");
-    validateDatabase(database);
+    const stored = row?.source ? parseJson(row.source, null) : DEFAULT_DATABASE;
+    if (!stored) throw new Error("active_database_corrupt");
+    const database = {
+      ...DEFAULT_DATABASE,
+      ...stored,
+      credentials: { ...(DEFAULT_DATABASE.credentials || {}), ...(stored.credentials || {}) },
+      runtime: {
+        ...(DEFAULT_DATABASE.runtime || {}),
+        ...(stored.runtime || {}),
+        limits: { ...(DEFAULT_DATABASE.runtime?.limits || {}), ...(stored.runtime?.limits || {}) },
+        telegram: { ...(DEFAULT_DATABASE.runtime?.telegram || {}), ...(stored.runtime?.telegram || {}) },
+      },
+      telegram: {
+        ...(DEFAULT_DATABASE.telegram || {}),
+        ...(stored.telegram || {}),
+        webhook: { ...(DEFAULT_DATABASE.telegram?.webhook || {}), ...(stored.telegram?.webhook || {}) },
+      },
+      settings: {
+        ...(DEFAULT_DATABASE.settings || {}),
+        ...(stored.settings || {}),
+        http: { ...(DEFAULT_DATABASE.settings?.http || {}), ...(stored.settings?.http || {}) },
+        execution: { ...(DEFAULT_DATABASE.settings?.execution || {}), ...(stored.settings?.execution || {}) },
+        conversations: { ...(DEFAULT_DATABASE.settings?.conversations || {}), ...(stored.settings?.conversations || {}) },
+      },
+      menus: { ...(DEFAULT_DATABASE.menus || {}), ...(stored.menus || {}) },
+    };
+    try {
+      validateDatabase(database);
+    } catch (error) {
+      if (versionIsOlder(stored.manifest?.version, DEFAULT_DATABASE.manifest.version)) {
+        this.databaseCache = DEFAULT_DATABASE;
+        this.logSync("warn", "database.legacy_definition_fallback", `${stored.manifest?.version || "unknown"}->${DEFAULT_DATABASE.manifest.version}:${String(error?.message || error).slice(0, 240)}`);
+        return this.databaseCache;
+      }
+      throw error;
+    }
     this.databaseCache = database;
     return database;
+  }
+
+  get ownerId() {
+    const database = this.databaseCache || this.loadDatabase();
+    return String(database.credentials?.ownerId || DEFAULT_DATABASE.credentials?.ownerId || "");
+  }
+
+  runtimeLimits(database = this.loadDatabase()) {
+    return database.runtime?.limits || DEFAULT_DATABASE.runtime?.limits || {};
+  }
+
+  menuIdleSeconds(database = this.loadDatabase()) {
+    return Math.min(86_400, Math.max(60, Number(database.menus?.idleTimeoutSeconds ?? database.runtime?.menuIdleSeconds) || 600));
+  }
+
+  credentials(database = this.loadDatabase()) {
+    return { ...(DEFAULT_DATABASE.credentials || {}), ...(database.credentials || {}) };
   }
 
   runtimeContext(database, now = Date.now()) {
     return {
       runtime: {
         name: "MUNITOS",
-        version: RUNTIME_VERSION,
+        version: String(database.runtime?.engineVersion || database.manifest.version || "unknown"),
         now,
         iso: new Date(now).toISOString(),
-        webhookUrl: String(this.env.WEBHOOK_URL || ""),
+        webhookUrl: String(database.telegram?.webhook?.url || ""),
         botToken: undefined,
         profile: database.profile || { name: "MUNITOS" },
         commandMenu: buildCommandMenu(database, false),
         ownerCommandMenu: buildCommandMenu(database, true),
         syncTelegramCommands: database.menus?.syncTelegramCommands !== false,
-        app: JSON.parse(JSON.stringify(database)),
+        app: (() => { const value = JSON.parse(JSON.stringify(database)); delete value.credentials; return value; })(),
         allowedUpdates: Array.isArray(database.telegram?.webhook?.allowedUpdates)
           ? database.telegram.webhook.allowedUpdates
           : ["message", "edited_message", "channel_post", "edited_channel_post", "callback_query", "my_chat_member", "chat_member", "chat_join_request"],
@@ -387,7 +435,7 @@ export class MunitosRuntime extends DurableObject {
   }
 
   setRawState(key, value) {
-    const serialized = safeSqlJson(value);
+    const serialized = safeSqlJson(value, Number(this.runtimeLimits().maxStateValueBytes) || 512_000);
     this.sql.exec(
       "INSERT INTO operational_state (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
       key, serialized, Date.now(),
@@ -496,10 +544,10 @@ export class MunitosRuntime extends DurableObject {
     const chatId = String(message.chat.id);
     const messageId = String(message.message_id);
     const now = Date.now();
-    const type = detectMenuType(context, markup);
+    const type = detectMenuType(context, markup, this.loadDatabase());
     this.sql.exec(
       "INSERT INTO menu_sessions (chat_id, message_id, opener_user_id, menu_type, last_activity, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, 'active') ON CONFLICT(chat_id, message_id) DO UPDATE SET opener_user_id = excluded.opener_user_id, menu_type = excluded.menu_type, last_activity = excluded.last_activity, expires_at = excluded.expires_at, status = 'active'",
-      chatId, messageId, String(context.user.id), type, now, now + MENU_IDLE_SECONDS * 1000,
+      chatId, messageId, String(context.user.id), type, now, now + this.menuIdleSeconds() * 1000,
     );
     await this.scheduleNextAlarm();
   }
@@ -511,7 +559,7 @@ export class MunitosRuntime extends DurableObject {
     const now = Date.now();
     const result = this.sql.exec(
       "UPDATE menu_sessions SET last_activity = ?, expires_at = ?, status = 'active' WHERE chat_id = ? AND message_id = ? AND status = 'active' AND expires_at > ?",
-      now, now + MENU_IDLE_SECONDS * 1000, String(message.chat.id), String(message.message_id), now,
+      now, now + this.menuIdleSeconds() * 1000, String(message.chat.id), String(message.message_id), now,
     );
     const changed = Number(result?.rowsWritten || 0) > 0;
     if (changed) await this.scheduleNextAlarm();
@@ -537,32 +585,32 @@ export class MunitosRuntime extends DurableObject {
     const userId = String(context.user?.id || "");
     if (!callback?.id) return false;
     if (!message?.chat?.id || !message?.message_id || !userId) {
-      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.invalid || "منوی نامعتبر است.");
+      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.invalid || "");
       return false;
     }
     const session = this.menuSession(message.chat.id, message.message_id);
     if (!session || session.status !== "active" || Number(session.expires_at) <= Date.now()) {
-      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.expired || "این منو منقضی شده است.");
+      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.expired || "");
       return false;
     }
     if (String(session.opener_user_id) !== userId) {
-      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.otherUser || "این منو متعلق به شخص دیگری است.");
+      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.otherUser || "");
       return false;
     }
     if (session.menu_type === "owner") {
       if (userId !== this.ownerId || message.chat.type !== "private") {
-        await this.answerCallback(context, database.ui?.messages?.menuSecurity?.ownerOnly || "دسترسی مالک لازم است.");
+        await this.answerCallback(context, database.ui?.messages?.menuSecurity?.ownerOnly || "");
         return false;
       }
     } else if (session.menu_type === "groupAdmin") {
       if (!["group", "supergroup"].includes(message.chat.type) || !await this.checkChatAdmin(message.chat.id, userId, database)) {
-        await this.answerCallback(context, database.ui?.messages?.menuSecurity?.groupAdminOnly || "دسترسی مدیر گروه لازم است.");
+        await this.answerCallback(context, database.ui?.messages?.menuSecurity?.groupAdminOnly || "");
         return false;
       }
     }
     const touched = await this.touchMenu(context);
     if (!touched) {
-      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.inactive || "این منو منقضی شده است.");
+      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.inactive || "");
       return false;
     }
     return true;
@@ -580,9 +628,11 @@ export class MunitosRuntime extends DurableObject {
     for (const session of expired) {
       const type = session.menu_type;
       const messages = this.loadDatabase().ui?.messages?.menuExpiry || {};
-      const message = type === "owner" || type === "groupAdmin"
-        ? messages.admin || "منوی ادمین پس از ۱۰ دقیقه بلااستفاده بودن بسته شد."
-        : messages.user || "منوی یوزر پس از ۱۰ دقیقه بلااستفاده بودن بسته شد.";
+      const message = type === "owner"
+        ? messages.owner || ""
+        : type === "groupAdmin"
+          ? messages.admin || messages.groupAdmin || ""
+          : messages.user || "";
       try {
         await this.callTelegram("editMessageText", {
           chat_id: session.chat_id,
@@ -606,76 +656,13 @@ export class MunitosRuntime extends DurableObject {
     return expired.length;
   }
 
-  async renderOwnerTargets(context, database) {
-    if (!context.owner?.isOwner || context.chat?.type !== "private" || String(context.user?.id) !== this.ownerId) {
-      await this.answerCallback(context, database.ui?.messages?.menuSecurity?.ownerTargetsOnly || "فقط مالک ربات به این بخش دسترسی دارد.");
-      return false;
-    }
-    const config = database.ui?.owner?.targets;
-    if (!config || typeof config !== "object") throw new Error("owner_targets_ui_config_missing");
-    const kind = context.kind === "channels" ? "channels" : "groups";
-    const prefix = `global:registry:${kind}:`;
-    const rows = this.sql.exec(
-      "SELECT key, value FROM operational_state WHERE substr(key, 1, ?) = ? ORDER BY key LIMIT 2000",
-      prefix.length, prefix,
-    ).toArray();
-    const pageSize = Math.min(10, Math.max(1, Number(config.pageSize) || 6));
-    const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
-    const requestedPage = Math.max(0, Number.parseInt(String(context.page ?? "0"), 10) || 0);
-    const page = Math.min(requestedPage, pageCount - 1);
-    const selected = rows.slice(page * pageSize, (page + 1) * pageSize);
-    const buttons = selected.map((row) => {
-      const record = parseJson(row.value, {}) || {};
-      const id = row.key.slice(prefix.length);
-      const active = record.active !== false;
-      const title = String(record.title || record.username || id).replace(/[\r\n]+/g, " ").slice(0, 42);
-      const variables = {
-        id,
-        title,
-        status: active ? config.activeMark || "🟢" : config.inactiveMark || "🔴",
-      };
-      return [applyMenuTemplate(config.targetButton, variables)];
-    });
-    if (page > 0 || page + 1 < pageCount) {
-      const navigation = [];
-      if (page > 0) navigation.push(applyMenuTemplate(config.previousButton, { kind, page: page - 1 }));
-      if (page + 1 < pageCount) navigation.push(applyMenuTemplate(config.nextButton, { kind, page: page + 1 }));
-      if (navigation.length) buttons.push(navigation);
-    }
-    for (const row of Array.isArray(config.footerButtons) ? config.footerButtons : []) {
-      if (Array.isArray(row) && row.length) buttons.push(applyMenuTemplate(row, { kind, page }));
-    }
-    const title = kind === "groups" ? config.groupsTitle : config.channelsTitle;
-    const text = applyMenuTemplate(config.text, {
-      title: title || (kind === "groups" ? "گروه‌ها" : "کانال‌ها"),
-      count: rows.length,
-      page: page + 1,
-      pageCount,
-      kind,
-    });
-    const callbackMessage = context.callback?.message;
-    const method = callbackMessage ? "editMessageText" : "sendMessage";
-    const payload = {
-      chat_id: context.chat.id,
-      text,
-      parse_mode: database.ui?.style?.parseMode || "HTML",
-      link_preview_options: { is_disabled: true },
-      reply_markup: { inline_keyboard: buttons },
-    };
-    if (callbackMessage) payload.message_id = callbackMessage.message_id;
-    await this.callTelegram(method, payload, {}, {}, context);
-    return true;
-  }
-
-  async callTelegram(method, payload = {}, files = {}, options = {}, context = {}) {
-    const configuredDatabase = this.databaseCache
-      || parseJson(this.sql.exec("SELECT source FROM application_config WHERE id = 1").toArray()[0]?.source, DEFAULT_DATABASE);
+  async callTelegram(method, payload = {}, files = {}, options = {}, context = {}, database = null) {
+    const configuredDatabase = database || this.loadDatabase();
     if (configuredDatabase?.integrations?.telegram?.enabled === false && options.allowDisabled !== true) throw new Error("telegram_integration_disabled");
     let apiMethod = String(method || "").trim();
     let apiPayload = { ...(payload || {}) };
     if (apiMethod === "setWebhook") {
-      const webhookSecret = String(this.env.WEBHOOK_SECRET || "").trim();
-      if (!webhookSecret) throw new Error("cloudflare_secret_missing:WEBHOOK_SECRET");
+      const webhookSecret = String(this.credentials(configuredDatabase).webhookSecret || "").trim();
       apiPayload.secret_token = webhookSecret;
     }
     const callbackMessage = context?.callback?.message;
@@ -694,13 +681,13 @@ export class MunitosRuntime extends DurableObject {
     }
     if (initialMenu && String(apiPayload.chat_id) === String(context.chat?.id)) {
       const greetingConfig = configuredDatabase?.ui?.messages?.greeting || {};
-      const firstName = String(context.user.first_name || context.user.username || greetingConfig.fallbackName || "کاربر").slice(0, 64);
-      const greeting = applyMenuTemplate(greetingConfig.template || "{{firstName}} جان، خوش آمدی.", {
+      const firstName = String(context.user.first_name || context.user.username || greetingConfig.fallbackName || "").slice(0, 64);
+      const greeting = applyMenuTemplate(greetingConfig.template || "", {
         id: encodeURIComponent(String(context.user.id)),
         firstName: escapeHtml(firstName),
       });
       const menuText = String(apiPayload.text || "");
-      if (!menuText.includes(greetingConfig.marker || "جان، خوش آمدی")) {
+      if (!menuText.includes(greetingConfig.marker || "")) {
         apiPayload.text = `${greeting}${greetingConfig.separator ?? "\n\n"}${menuText}`;
       }
       if (apiPayload.reply_to_message_id == null && context.message.message_id) apiPayload.reply_to_message_id = context.message.message_id;
@@ -750,14 +737,15 @@ export class MunitosRuntime extends DurableObject {
       body = JSON.stringify(apiPayload ?? {});
       headers = { "content-type": "application/json" };
     }
-    const botToken = String(this.env.BOT_TOKEN || "").trim();
-    if (!botToken) throw new Error("cloudflare_secret_missing:BOT_TOKEN");
-    const response = await fetch(`${TELEGRAM_API_BASE}${botToken}/${apiMethod}`, {
+    const botToken = String(this.credentials(configuredDatabase).telegramBotToken || "").trim();
+    if (!botToken) throw new Error("telegram_bot_token_missing_in_database");
+    const apiBase = String(configuredDatabase.runtime?.telegram?.apiBase || "https://api.telegram.org/bot");
+    const response = await fetch(`${apiBase}${botToken}/${apiMethod}`, {
       method: "POST",
       headers,
       body,
     });
-    const raw = await readResponseLimited(response, 2 * 1024 * 1024);
+    const raw = await readResponseLimited(response, Number(this.runtimeLimits(configuredDatabase).maxTelegramResponseBytes) || 2 * 1024 * 1024);
     const result = parseJson(raw, null);
     if (!response.ok || !result || result.ok !== true) {
       const code = result?.error_code || response.status;
@@ -805,7 +793,7 @@ export class MunitosRuntime extends DurableObject {
         if (!headers.has("content-type")) headers.set("content-type", "application/json");
       }
     }
-    if (body && utf8Size(typeof body === "string" ? body : body.toString()) > MAX_HTTP_BODY_BYTES) {
+    if (body && utf8Size(typeof body === "string" ? body : body.toString()) > (Number(this.runtimeLimits(database).maxHttpBodyBytes) || 1_048_576)) {
       clearTimeout(timer);
       throw new Error("http_request_body_too_large");
     }
@@ -833,7 +821,8 @@ export class MunitosRuntime extends DurableObject {
         url = nextUrl;
         redirects++;
       }
-      const maxResponse = Math.min(MAX_HTTP_BODY_BYTES, Math.max(1024, Number(httpSettings.maxResponseBytes || MAX_HTTP_BODY_BYTES)));
+      const maxHttpBodyBytes = Number(this.runtimeLimits(database).maxHttpBodyBytes) || 1_048_576;
+      const maxResponse = Math.min(maxHttpBodyBytes, Math.max(1024, Number(httpSettings.maxResponseBytes || maxHttpBodyBytes)));
       const text = await readResponseLimited(response, maxResponse);
       const responseType = String(request.response || "json").toLowerCase();
       const parsed = responseType === "text" ? text : parseJson(text, text);
@@ -846,9 +835,29 @@ export class MunitosRuntime extends DurableObject {
   }
 
   async callConfiguredApi(apiId, apiDefinition, input, context, database) {
-    const apiContext = { ...context, input: input || {} };
+    const apiInput = input && typeof input === "object" ? input : {};
+    const apiContext = {
+      ...context,
+      input: apiInput,
+      credentials: { integrations: this.credentials(database).integrations || {} },
+    };
     const resolved = this.resolveConfigValue(apiDefinition, apiContext);
-    return this.requestExternal(resolved, apiContext, database);
+    const provider = String(resolved.provider || "http");
+    if (provider === "telegram") {
+      const payload = { ...(resolved.payload || {}), ...(apiInput.payload || {}) };
+      const files = { ...(resolved.files || {}), ...(apiInput.files || {}) };
+      const method = String(resolved.method || apiInput.method || "");
+      return this.callTelegram(method, payload, files, {}, context, database);
+    }
+    if (provider === "http") {
+      const request = { ...resolved, ...(apiInput.request || {}) };
+      if (apiInput.query) request.query = { ...(resolved.query || {}), ...apiInput.query };
+      if (apiInput.headers) request.headers = { ...(resolved.headers || {}), ...apiInput.headers };
+      if (apiInput.body !== undefined) request.body = apiInput.body;
+      delete request.provider;
+      return this.requestExternal(request, apiContext, database);
+    }
+    throw new Error(`api_provider_unsupported:${provider}:${apiId}`);
   }
 
   resolveConfigValue(value, context) {
@@ -880,7 +889,7 @@ export class MunitosRuntime extends DurableObject {
     if (!workflow || !database.workflows?.[workflow]) throw new Error("queue_workflow_not_found");
     const configuredAttempts = Number(maxAttempts ?? database.settings?.execution?.maxQueueAttempts ?? database.queues?.maxAttempts ?? 5);
     const serialized = JSON.stringify(input ?? {});
-    if (utf8Size(serialized) > MAX_QUEUE_INPUT_BYTES) throw new Error("queue_input_too_large");
+    if (utf8Size(serialized) > (Number(this.runtimeLimits().maxQueueInputBytes) || 256_000)) throw new Error("queue_input_too_large");
     const id = randomId();
     const now = Date.now();
     this.sql.exec(
@@ -1001,7 +1010,7 @@ export class MunitosRuntime extends DurableObject {
     const key = this.getConversationKey(context);
     if (!key) throw new Error("conversation_context_missing");
     if (operation === "start") {
-      const configuredTtl = Number(this.loadDatabase().settings?.conversations?.defaultTtlSeconds) || INSTALL_SESSION_SECONDS;
+      const configuredTtl = Number(this.loadDatabase().settings?.conversations?.defaultTtlSeconds) || Number(this.loadDatabase().runtime?.installSessionSeconds) || 600;
       const ttl = Math.min(86_400, Math.max(30, Number(args.ttlSeconds) || configuredTtl));
       const value = {
         workflow: String(args.workflow || ""),
@@ -1030,7 +1039,6 @@ export class MunitosRuntime extends DurableObject {
     const interpreter = new WorkflowInterpreter({
       database,
       io: {
-        telegram: (method, payload, context, files) => this.callTelegram(method, payload, files, {}, context),
         api: (apiId, definition, input, ctx) => this.callConfiguredApi(apiId, definition, input, ctx, database),
         http: (request, ctx) => this.requestExternal(request, ctx, database),
         state: (operation, args, ctx) => this.stateOperation(operation, args, ctx),
@@ -1039,10 +1047,7 @@ export class MunitosRuntime extends DurableObject {
         conversation: (operation, args, ctx) => this.conversationOperation(operation, args, ctx),
         quota: (operation, args, ctx) => this.quotaOperation(operation, args, ctx, database),
         runtimeStatus: (ctx) => this.runtimeStatus(database, ctx),
-        runtimeLogs: (options, ctx) => this.runtimeLogs(options, ctx),
         runtimeControl: (operation, options, ctx) => this.runtimeControl(operation, options, ctx),
-        ownerTargets: (ctx) => this.renderOwnerTargets(ctx, database),
-        log: (entry) => this.log(entry),
       },
       limits: {
         maxActions: Math.min(2000, Math.max(10, Number(database.settings?.execution?.maxActionsPerUpdate) || 500)),
@@ -1057,7 +1062,6 @@ export class MunitosRuntime extends DurableObject {
     const interpreter = new WorkflowInterpreter({
       database,
       io: {
-        telegram: (method, payload, context, files) => this.callTelegram(method, payload, files, {}, context),
         api: (apiId, definition, input, ctx) => this.callConfiguredApi(apiId, definition, input, ctx, database),
         http: (request, ctx) => this.requestExternal(request, ctx, database),
         state: (operation, args, ctx) => this.stateOperation(operation, args, ctx),
@@ -1066,10 +1070,7 @@ export class MunitosRuntime extends DurableObject {
         conversation: (operation, args, ctx) => this.conversationOperation(operation, args, ctx),
         quota: (operation, args, ctx) => this.quotaOperation(operation, args, ctx, database),
         runtimeStatus: (ctx) => this.runtimeStatus(database, ctx),
-        runtimeLogs: (options, ctx) => this.runtimeLogs(options, ctx),
         runtimeControl: (operation, options, ctx) => this.runtimeControl(operation, options, ctx),
-        ownerTargets: (ctx) => this.renderOwnerTargets(ctx, database),
-        log: (entry) => this.log(entry),
       },
       limits: {
         maxActions: Math.min(2000, Math.max(10, Number(database.settings?.execution?.maxActionsPerUpdate) || 500)),
@@ -1101,15 +1102,6 @@ export class MunitosRuntime extends DurableObject {
     throw new Error("runtime_control_operation_invalid");
   }
 
-  async runtimeLogs(options = {}, context = {}) {
-    if (!context.owner?.isOwner) throw new Error("runtime_owner_only");
-    const limit = Math.min(50, Math.max(1, Number(options.limit) || 20));
-    return this.sql.exec(
-      "SELECT level, code, detail, created_at FROM runtime_logs ORDER BY id DESC LIMIT ?",
-      limit,
-    ).toArray();
-  }
-
   async runtimeStatus(database = this.loadDatabase(), context = {}) {
     if (!context.owner?.isOwner) throw new Error("runtime_owner_only");
     const stateCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM operational_state").toArray()[0]?.count || 0);
@@ -1118,7 +1110,7 @@ export class MunitosRuntime extends DurableObject {
     const registeredChats = Number(this.sql.exec("SELECT COUNT(*) AS count FROM operational_state WHERE substr(key, 1, 15) = 'global:registry' AND value LIKE '%\"active\":true%'").toArray()[0]?.count || 0);
     const config = this.sql.exec("SELECT version, sha256, installed_at FROM application_config WHERE id = 1").toArray()[0];
     return {
-      runtimeVersion: RUNTIME_VERSION,
+      runtimeVersion: String(database.runtime?.engineVersion || database.manifest.version || "unknown"),
       paused: this.isRuntimePaused(),
       databaseVersion: config?.version || database.manifest.version,
       databaseHash: config?.sha256 || "embedded",
@@ -1147,10 +1139,6 @@ export class MunitosRuntime extends DurableObject {
     } catch { /* logging must not break bot processing */ }
   }
 
-  async log(entry = {}) {
-    this.logSync(entry.level || "info", entry.code || "database.log", entry.detail || "");
-    return true;
-  }
 
   async sendText(chatId, text, options = {}) {
     return this.callTelegram("sendMessage", { chat_id: chatId, text, ...options });
@@ -1210,7 +1198,7 @@ export class MunitosRuntime extends DurableObject {
 
   async dispatchCommand(match, context, database) {
     if (!await this.canRunCommand(match.definition, context, database)) {
-      await this.sendText(context.chat.id, "اجازه اجرای این فرمان را نداری.");
+      await this.sendText(context.chat.id, database.ui?.messages?.commandDenied || "");
       return;
     }
     context.command = { id: match.id, definition: match.definition };
@@ -1252,18 +1240,21 @@ export class MunitosRuntime extends DurableObject {
 
   async startInstall(context) {
     if (!context.owner.isOwner || !isPrivate(context.chat)) {
-      if (context.chat?.id) await this.sendInstallerText(context.chat.id, "این دستور فقط برای مالک و در گفتگوی خصوصی فعال است.");
+      if (context.chat?.id) await this.sendInstallerText(context.chat.id, this.loadDatabase().ui?.messages?.installer?.ownerOnly || "");
       return;
     }
     const key = `global:install:session:${this.ownerId}`;
-    this.setRawState(key, { expiresAt: Date.now() + INSTALL_SESSION_SECONDS * 1000 });
-    await this.sendInstallerText(context.chat.id, "فایل <code>database.js</code> را به‌صورت Document ارسال کن. فقط ساختار داده‌ای مجاز است؛ کد اجرایی پذیرفته نمی‌شود.", { parse_mode: "HTML" });
+    this.setRawState(key, { expiresAt: Date.now() + (Number(this.loadDatabase().runtime?.installSessionSeconds) || 600) * 1000 });
+    await this.sendInstallerText(context.chat.id, this.loadDatabase().ui?.messages?.installer?.request || "", { parse_mode: "HTML" });
   }
 
   async downloadTelegramDocument(fileId) {
-    const botToken = String(this.env.BOT_TOKEN || "").trim();
-    if (!botToken) throw new Error("cloudflare_secret_missing:BOT_TOKEN");
-    const fileResponse = await fetch(`${TELEGRAM_API_BASE}${botToken}/getFile`, {
+    const database = this.loadDatabase();
+    const credentials = this.credentials(database);
+    const botToken = String(credentials.telegramBotToken || "").trim();
+    const apiBase = String(database.runtime?.telegram?.apiBase || "https://api.telegram.org/bot");
+    const fileBase = String(database.runtime?.telegram?.fileBase || "https://api.telegram.org/file/bot");
+    const fileResponse = await fetch(`${apiBase}${botToken}/getFile`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ file_id: fileId }),
@@ -1272,10 +1263,10 @@ export class MunitosRuntime extends DurableObject {
     if (!fileResponse.ok || fileResult?.ok !== true || !fileResult.result?.file_path) throw new Error("telegram_file_lookup_failed");
     const filePath = String(fileResult.result.file_path);
     if (filePath.includes("..") || filePath.startsWith("/") || filePath.includes("\\")) throw new Error("telegram_file_path_invalid");
-    const response = await fetch(`${TELEGRAM_FILE_BASE}${botToken}/${filePath}`);
+    const response = await fetch(`${fileBase}${botToken}/${filePath}`);
     if (!response.ok) throw new Error("telegram_file_download_failed");
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > MAX_DATABASE_BYTES) throw new Error("database_file_too_large");
+    if (bytes.byteLength > (Number(this.runtimeLimits(database).maxDatabaseBytes) || 1_500_000)) throw new Error("database_file_too_large");
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   }
 
@@ -1288,8 +1279,7 @@ export class MunitosRuntime extends DurableObject {
     for (const job of jobs) {
       if (nextDatabase.workflows?.[job.workflow]) continue;
       const target = aliases[job.workflow];
-      if (!target || !nextDatabase.workflows?.[target]) throw new Error(`active_queue_workflow_missing:${job.workflow}`);
-      jobUpdates.push({ id: job.id, workflow: target });
+      jobUpdates.push({ id: job.id, workflow: target && nextDatabase.workflows?.[target] ? target : null });
     }
 
     const conversations = this.sql.exec("SELECT key, value FROM operational_state WHERE key LIKE 'global:conversation:%'").toArray();
@@ -1298,8 +1288,7 @@ export class MunitosRuntime extends DurableObject {
       if (!conversation || Number(conversation.expiresAt) < Date.now()) continue;
       if (nextDatabase.workflows?.[conversation.workflow]) continue;
       const target = aliases[conversation.workflow];
-      if (!target || !nextDatabase.workflows?.[target]) throw new Error(`active_conversation_workflow_missing:${conversation.workflow}`);
-      conversationUpdates.push({ key: row.key, value: { ...conversation, workflow: target } });
+      conversationUpdates.push({ key: row.key, value: target && nextDatabase.workflows?.[target] ? { ...conversation, workflow: target } : null });
     }
     return { jobUpdates, conversationUpdates };
   }
@@ -1313,11 +1302,11 @@ export class MunitosRuntime extends DurableObject {
     }
     const document = context.message?.document;
     if (!document || document.file_name !== "database.js") {
-      await this.sendInstallerText(context.chat.id, "نام فایل باید دقیقاً database.js باشد. دوباره /install را اجرا کن.");
+      await this.sendInstallerText(context.chat.id, this.loadDatabase().ui?.messages?.installer?.fileName || "");
       return true;
     }
-    if (Number(document.file_size || 0) > MAX_DATABASE_BYTES) {
-      await this.sendInstallerText(context.chat.id, "حجم دیتابیس از حد مجاز بیشتر است.");
+    if (Number(document.file_size || 0) > (Number(this.runtimeLimits().maxDatabaseBytes) || 1_500_000)) {
+      await this.sendInstallerText(context.chat.id, this.loadDatabase().ui?.messages?.installer?.fileTooLarge || "");
       return true;
     }
 
@@ -1325,11 +1314,12 @@ export class MunitosRuntime extends DurableObject {
     let source;
     try {
       source = await this.downloadTelegramDocument(document.file_id);
-      nextDatabase = parseDatabaseModule(source, { maxBytes: MAX_DATABASE_BYTES, maxDepth: 64, maxNodes: 200_000 });
+      nextDatabase = parseDatabaseModule(source, { maxBytes: Number(this.runtimeLimits().maxDatabaseBytes) || 1_500_000, maxDepth: 64, maxNodes: 200_000 });
       validateDatabase(nextDatabase);
     } catch (error) {
       const code = String(error?.code || error?.message || "database_invalid").slice(0, 180);
-      await this.sendInstallerText(context.chat.id, `نصب انجام نشد. دیتابیس فعلی تغییر نکرد.\nخطا: ${code}`);
+      const template = this.loadDatabase().ui?.messages?.installer?.invalid || "{{code}}";
+      await this.sendInstallerText(context.chat.id, applyMenuTemplate(template, { code }));
       return true;
     }
 
@@ -1338,7 +1328,8 @@ export class MunitosRuntime extends DurableObject {
       migrationPlan = this.planDatabaseUpgrade(nextDatabase);
     } catch (error) {
       const code = String(error?.message || error).slice(0, 180);
-      await this.sendInstallerText(context.chat.id, `نصب انجام نشد؛ یک وظیفه یا مکالمه فعال به Workflow حذف‌شده وابسته است. دیتابیس فعلی دست‌نخورده ماند.\n${code}`);
+      const template = this.loadDatabase().ui?.messages?.installer?.migrationBlocked || "{{code}}";
+      await this.sendInstallerText(context.chat.id, applyMenuTemplate(template, { code }));
       return true;
     }
 
@@ -1356,10 +1347,18 @@ export class MunitosRuntime extends DurableObject {
       );
       this.sql.exec("DELETE FROM operational_state WHERE key = ?", key);
       for (const update of migrationPlan.jobUpdates) {
-        this.sql.exec("UPDATE queued_jobs SET workflow = ?, updated_at = ? WHERE id = ?", update.workflow, now, update.id);
+        if (update.workflow) {
+          this.sql.exec("UPDATE queued_jobs SET workflow = ?, updated_at = ? WHERE id = ?", update.workflow, now, update.id);
+        } else {
+          this.sql.exec("UPDATE queued_jobs SET status = 'failed', last_error = ?, updated_at = ? WHERE id = ?", "workflow_removed_by_database_update", now, update.id);
+        }
       }
       for (const update of migrationPlan.conversationUpdates) {
-        this.sql.exec("UPDATE operational_state SET value = ?, updated_at = ? WHERE key = ?", JSON.stringify(update.value), now, update.key);
+        if (update.value) {
+          this.sql.exec("UPDATE operational_state SET value = ?, updated_at = ? WHERE key = ?", JSON.stringify(update.value), now, update.key);
+        } else {
+          this.sql.exec("DELETE FROM operational_state WHERE key = ?", update.key);
+        }
       }
     });
     this.databaseCache = nextDatabase;
@@ -1383,10 +1382,20 @@ export class MunitosRuntime extends DurableObject {
     }
 
     const status = await this.runtimeStatus(nextDatabase, context);
-    const extra = lifecycleError ? `\nتنظیمات اولیه نیاز به بررسی دارد: ${lifecycleError}` : "";
+    const extra = lifecycleError
+      ? applyMenuTemplate(nextDatabase.ui?.messages?.installer?.lifecycleWarning || "{{error}}", { error: lifecycleError })
+      : "";
+    const installedTemplate = nextDatabase.ui?.messages?.installer?.installed || "{{version}}";
     await this.sendInstallerText(
       context.chat.id,
-      `دیتابیس MUNITOS نصب شد.\nنسخه: ${version}\nSHA-256: <code>${hash}</code>\nفرمان‌ها: ${status.commands}\nWorkflowها: ${status.workflows}\nAPIها: ${status.apis}${extra}`,
+      applyMenuTemplate(installedTemplate, {
+        version,
+        hash,
+        commands: status.commands,
+        workflows: status.workflows,
+        apis: status.apis,
+        extra,
+      }),
       { parse_mode: "HTML" },
     );
     return true;
@@ -1446,7 +1455,7 @@ export class MunitosRuntime extends DurableObject {
         const now = Date.now();
         this.sql.exec(
           "UPDATE menu_sessions SET last_activity = ?, expires_at = ? WHERE chat_id = ? AND opener_user_id = ? AND status = 'active' AND expires_at > ?",
-          now, now + MENU_IDLE_SECONDS * 1000, String(context.chat?.id || ""), String(context.user.id), now,
+          now, now + this.menuIdleSeconds(database) * 1000, String(context.chat?.id || ""), String(context.user.id), now,
         );
         await this.scheduleNextAlarm();
       }
@@ -1528,44 +1537,48 @@ export class MunitosRuntime extends DurableObject {
     await this.processOneQueueJob(now);
     return { ok: true, version: database.manifest.version };
   }
-}
 
-export default {
-  async fetch(request, env, ctx) {
+  async fetch(request) {
     const url = new URL(request.url);
-    if (url.pathname === "/health" || url.pathname === "/") {
-      return jsonResponse({ ok: true, name: "MUNITOS", version: RUNTIME_VERSION });
+    const database = this.loadDatabase();
+    const runtimeVersion = String(database.runtime?.engineVersion || database.manifest.version || "unknown");
+    if ((url.pathname === "/health" || url.pathname === "/") && request.method === "GET") {
+      return jsonResponse({ ok: true, name: database.manifest.name || "MUNITOS", version: runtimeVersion });
     }
-
-    if (url.pathname !== "/telegram/webhook" || request.method !== "POST") {
+    const webhookPath = String(database.telegram?.webhook?.path || "/telegram/webhook");
+    if (url.pathname !== webhookPath || request.method !== "POST") {
       return jsonResponse({ ok: false, error: "not_found" }, 404);
     }
-
-    const configuredSecret = String(env.WEBHOOK_SECRET || "").trim();
-    if (!configuredSecret) return jsonResponse({ ok: false, error: "webhook_secret_not_configured" }, 503);
-    const secret = request.headers.get("x-telegram-bot-api-secret-token") || "";
-    if (secret !== configuredSecret) return jsonResponse({ ok: false, error: "unauthorized" }, 401);
-
+    const configuredSecret = String(this.credentials(database).webhookSecret || "").trim();
+    const suppliedSecret = request.headers.get("x-telegram-bot-api-secret-token") || "";
+    if (!configuredSecret || suppliedSecret !== configuredSecret) return jsonResponse({ ok: false, error: "unauthorized" }, 401);
+    const maxUpdateBytes = Number(this.runtimeLimits(database).maxUpdateBytes) || 2_000_000;
     const contentLength = Number(request.headers.get("content-length") || 0);
-    if (contentLength > MAX_UPDATE_BYTES) return jsonResponse({ ok: false, error: "update_too_large" }, 413);
-
+    if (contentLength > maxUpdateBytes) return jsonResponse({ ok: false, error: "update_too_large" }, 413);
     let update;
     try {
       const raw = await request.text();
-      if (utf8Size(raw) > MAX_UPDATE_BYTES) return jsonResponse({ ok: false, error: "update_too_large" }, 413);
+      if (utf8Size(raw) > maxUpdateBytes) return jsonResponse({ ok: false, error: "update_too_large" }, 413);
       update = JSON.parse(raw);
+      if (!update || typeof update !== "object" || Array.isArray(update)) throw new Error("update_object_required");
     } catch {
       return jsonResponse({ ok: false, error: "invalid_json" }, 400);
     }
-
     try {
-      const runtime = env.MUNITOS.getByName(DURABLE_OBJECT_NAME);
-      await runtime.handleUpdate(update);
+      await this.handleUpdate(update);
       return new Response("ok", { status: 200, headers: { "content-type": "text/plain; charset=utf-8" } });
     } catch (error) {
-      console.error("MUNITOS update failed", String(error?.message || error).slice(0, 500));
+      this.logSync("error", "update.processing_failed", String(error?.message || error).slice(0, 500));
       return jsonResponse({ ok: false, error: "update_processing_failed" }, 500);
     }
+  }
+
+}
+
+export default {
+  async fetch(request, env) {
+    const runtime = env.MUNITOS.getByName(DURABLE_OBJECT_NAME);
+    return runtime.fetch(request);
   },
 
   async scheduled(controller, env, ctx) {
@@ -1573,4 +1586,3 @@ export default {
     ctx.waitUntil(runtime.tick(Number(controller.scheduledTime || Date.now())));
   },
 };
-

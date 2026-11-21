@@ -1,10 +1,10 @@
 const FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const ACTION_TYPES = new Set([
-  "telegram.call", "api.call", "http.request",
+  "api.call", "http.request",
   "state.get", "state.set", "state.delete", "state.increment", "state.list",
-  "context.set", "context.merge", "condition", "each", "while", "workflow.run",
+  "context.set", "context.merge", "context.array.push", "condition", "each", "while", "workflow.run",
   "queue.enqueue", "queue.list", "queue.stats", "queue.retry", "queue.cancel", "conversation.start", "conversation.end", "conversation.update",
-  "quota.get", "quota.consume", "runtime.status", "runtime.logs", "runtime.control", "owner.targets.list", "log.write", "flow.return", "try", "throw",
+  "quota.get", "quota.consume", "runtime.status", "runtime.control", "template.render", "flow.return", "try", "throw",
 ]);
 
 export class DatabaseParseError extends Error {
@@ -238,14 +238,10 @@ function validateActionList(actions, path, db, depth = 0) {
       validateActionList(action.catch || [], `${path}_${i}_catch`, db, depth + 1);
       validateActionList(action.finally || [], `${path}_${i}_finally`, db, depth + 1);
     }
-    if (type === "telegram.call") {
-      assert(typeof action.method === "string" && /^[A-Za-z][A-Za-z0-9]{1,80}$/.test(action.method), `${path}_${i}_telegram_method_invalid`);
-      assert(action.payload === undefined || isPlainObject(action.payload), `${path}_${i}_telegram_payload_invalid`);
-      assert(action.files === undefined || isPlainObject(action.files), `${path}_${i}_telegram_files_invalid`);
-    }
     if (type === "http.request") assert(isPlainObject(action.request) && typeof action.request.url === "string", `${path}_${i}_http_request_invalid`);
     if (type.startsWith("state.")) assert(["global", "chat", "user", "chat_user"].includes(action.scope || (type === "state.list" ? "global" : "chat")), `${path}_${i}_state_scope_invalid`);
-    if (type === "context.set") assert(typeof action.path === "string" && action.path.length <= 300 && !UNSAFE_PATH.test(action.path), `${path}_${i}_context_path_invalid`);
+    if (type === "context.set" || type === "context.array.push") assert(typeof action.path === "string" && action.path.length <= 300 && !UNSAFE_PATH.test(action.path), `${path}_${i}_context_path_invalid`);
+    if (type === "template.render") assert(typeof action.as === "string" && action.as.length <= 100 && action.template !== undefined, `${path}_${i}_template_render_invalid`);
     if (type === "each" || type === "while") {
       if (action.limit !== undefined) assert(Number.isInteger(action.limit) && action.limit >= 1 && action.limit <= 500, `${path}_${i}_loop_limit_invalid`);
       if (type === "each") assert(typeof action.as === "string" && action.as.length <= 80, `${path}_${i}_each_alias_required`);
@@ -266,7 +262,7 @@ export function validateDatabase(database) {
   assert(Number(database.manifest.schemaVersion || 0) === 1, "unsupported_schema_version");
 
   const sections = [
-    "settings", "commands", "workflows", "apis", "quotas", "menus", "policies",
+    "settings", "commands", "workflows", "apis", "quotas", "menus", "policies", "credentials", "runtime",
     "messages", "integrations", "storage", "lifecycle", "profile", "migrations",
     "telegram", "modules", "features", "authorization", "roles", "permissions",
     "groups", "channels", "templates", "keyboards", "panels", "automations",
@@ -339,8 +335,16 @@ export function validateDatabase(database) {
 
   for (const [id, api] of Object.entries(database.apis || {})) {
     assert(isPlainObject(api), `api_${id}_must_be_object`);
-    assert(typeof api.url === "string" && api.url.length <= 2_000, `api_${id}_url_required`);
-    assert(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].includes(String(api.method || "GET").toUpperCase()), `api_${id}_method_invalid`);
+    const provider = String(api.provider || "http");
+    assert(["http", "telegram"].includes(provider), `api_${id}_provider_invalid`);
+    if (provider === "telegram") {
+      assert(typeof api.method === "string" && /^[A-Za-z][A-Za-z0-9]{1,80}$/.test(api.method), `api_${id}_telegram_method_invalid`);
+      assert(api.payload === undefined || isPlainObject(api.payload), `api_${id}_telegram_payload_invalid`);
+      assert(api.files === undefined || isPlainObject(api.files), `api_${id}_telegram_files_invalid`);
+    } else {
+      assert(typeof api.url === "string" && api.url.length <= 2_000, `api_${id}_url_required`);
+      assert(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].includes(String(api.method || "GET").toUpperCase()), `api_${id}_method_invalid`);
+    }
   }
 
   for (const [collectionName, collection] of [["events", database.events || []], ["callbacks", database.callbacks || []]]) {
@@ -417,6 +421,9 @@ function evaluateExpression(expression, context) {
     case "mod": return Number(second) === 0 ? null : Number(first) % Number(second);
     case "min": return Math.min(...args.map(Number));
     case "max": return Math.max(...args.map(Number));
+    case "ceil": return Math.ceil(Number(first || 0));
+    case "floor": return Math.floor(Number(first || 0));
+    case "round": return Math.round(Number(first || 0));
     case "sum": return (Array.isArray(first) ? first : []).reduce((sum, value) => sum + Number(value || 0), 0);
     case "unique": return [...new Set(Array.isArray(first) ? first : [])];
     case "first": return Array.isArray(first) ? (first[0] ?? null) : null;
@@ -429,7 +436,9 @@ function evaluateExpression(expression, context) {
       return Object.fromEntries(keys.filter((key) => !FORBIDDEN_KEYS.has(key) && Object.hasOwn(source, key)).map((key) => [key, source[key]]));
     }
     case "stringify": return JSON.stringify(first ?? null);
-    case "parseJson": return parseJson(String(first ?? ""), expression.default ?? null);
+    case "parseJson": {
+      try { return JSON.parse(String(first ?? "")); } catch { return expression.default ?? null; }
+    }
     case "now": return Date.now();
     case "iso": return new Date(Number(first || Date.now())).toISOString();
     case "eq": return first === second || String(first) === String(second);
@@ -463,6 +472,24 @@ export function resolveValue(value, context) {
       result[key] = resolveValue(item, context);
     }
     return result;
+  }
+  return value;
+}
+
+function renderTemplateValue(value, variables) {
+  if (typeof value === "string") {
+    return value.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, path) => {
+      const result = readPath(variables, String(path).trim(), "");
+      return result == null ? "" : typeof result === "object" ? JSON.stringify(result) : String(result);
+    });
+  }
+  if (Array.isArray(value)) return value.map((item) => renderTemplateValue(item, variables));
+  if (isPlainObject(value)) {
+    const output = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (!FORBIDDEN_KEYS.has(key)) output[key] = renderTemplateValue(item, variables);
+    }
+    return output;
   }
   return value;
 }
@@ -534,12 +561,6 @@ export class WorkflowInterpreter {
   async executeAction(action, context, depth) {
     const type = action.type;
     switch (type) {
-      case "telegram.call": {
-        const method = String(resolveValue(action.method, context) || "");
-        const payload = resolveValue(action.payload || {}, context);
-        const files = resolveValue(action.files || {}, context);
-        return this.io.telegram(method, payload, context, files);
-      }
       case "api.call": {
         const api = this.database.apis[action.api];
         const input = resolveValue(action.input || {}, context);
@@ -586,6 +607,29 @@ export class WorkflowInterpreter {
         if (!isPlainObject(data)) throw new Error("context_merge_object_required");
         Object.assign(context, data);
         return context;
+      }
+      case "template.render": {
+        const template = resolveValue(action.template, context);
+        const variables = resolveValue(action.variables || {}, context);
+        const rendered = renderTemplateValue(template, variables);
+        context[action.as] = rendered;
+        return rendered;
+      }
+      case "context.array.push": {
+        const key = String(action.path || "");
+        if (!key || UNSAFE_PATH.test(key)) throw new Error("context_array_path_forbidden");
+        const parts = key.split(".");
+        let target = context;
+        for (const part of parts.slice(0, -1)) {
+          if (!isPlainObject(target[part])) target[part] = {};
+          target = target[part];
+        }
+        const last = parts.at(-1);
+        if (target[last] === undefined) target[last] = [];
+        if (!Array.isArray(target[last])) throw new Error("context_array_target_required");
+        const value = resolveValue(action.value, context);
+        target[last].push(value);
+        return target[last];
       }
       case "condition": {
         const branch = compareCondition(action.if, context) ? action.then || [] : action.else || [];
@@ -652,20 +696,9 @@ export class WorkflowInterpreter {
       }
       case "runtime.status":
         return this.io.runtimeStatus(context);
-      case "runtime.logs": {
-        const options = resolveValue(action, context);
-        return this.io.runtimeLogs(options, context);
-      }
       case "runtime.control": {
         const options = resolveValue(action, context);
         return this.io.runtimeControl(String(options.operation || ""), options, context);
-      }
-      case "owner.targets.list":
-        if (typeof this.io.ownerTargets !== "function") throw new Error("owner_targets_handler_unavailable");
-        return this.io.ownerTargets(context);
-      case "log.write": {
-        const entry = resolveValue(action.entry || {}, context);
-        return this.io.log(entry, context);
       }
       case "try": {
         let result = null;
@@ -717,11 +750,12 @@ export function extractUpdateContext(update) {
     || update?.chat_member?.chat || update?.chat_join_request?.chat
     || findNestedObject(update, (value) => Number.isInteger(Number(value.id)) && ["private", "group", "supergroup", "channel"].includes(value.type))
     || null;
-  const user = update?.callback_query?.from || message?.from || update?.my_chat_member?.from
-    || update?.chat_member?.from || update?.chat_join_request?.from || update?.inline_query?.from
-    || update?.chosen_inline_result?.from
-    || findNestedObject(update, (value) => Number.isInteger(Number(value.id)) && (typeof value.is_bot === "boolean" || typeof value.first_name === "string"))
-    || null;
+  const user = update?.callback_query
+    ? update.callback_query.from || null
+    : message?.from || update?.my_chat_member?.from || update?.chat_member?.from
+      || update?.chat_join_request?.from || update?.inline_query?.from || update?.chosen_inline_result?.from
+      || findNestedObject(update, (value) => Number.isInteger(Number(value.id)) && (typeof value.is_bot === "boolean" || typeof value.first_name === "string"))
+      || null;
   return { message, chat, user };
 }
 

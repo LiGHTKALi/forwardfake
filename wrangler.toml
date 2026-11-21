@@ -1,20 +1,10 @@
 name = "munitos"
 main = "worker.js"
-compatibility_date = "2026-11-20"
+compatibility_date = "2026-11-21"
 workers_dev = true
 preview_urls = false
 
-[vars]
-OWNER_TELEGRAM_ID = "8621035125"
-# Keep this URL aligned with the workers.dev domain enabled in the Cloudflare account.
-WEBHOOK_URL = "https://munitos.killerdutchmobin.workers.dev/telegram/webhook"
-
-# Set these as encrypted Cloudflare Worker Secrets, never in this file:
-# BOT_TOKEN
-# WEBHOOK_SECRET
-
 [triggers]
-# One generic tick drives database-defined schedules and queue recovery.
 crons = ["* * * * *"]
 
 [[durable_objects.bindings]]
