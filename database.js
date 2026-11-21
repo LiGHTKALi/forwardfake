@@ -46,7 +46,7 @@ export default {
       ],
       "dropPendingUpdates": false,
       "maxConnections": 40,
-      "url": "https://munitos.killerdutchmobin.workers.dev/telegram/webhook",
+      "url": "https://munitos.cyberguardiansunion.workers.dev/telegram/webhook",
       "path": "/telegram/webhook"
     }
   },
